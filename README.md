@@ -12,8 +12,8 @@ Azahar（Nintendo 3DS）在 dArkOS / RK3562 上的移植记录与构建脚本。
 | 路线 | 形态 | 现状 |
 |---|---|---|
 | A. libretro 核心 | RetroArch 加载 `azahar_libretro.so` | 能编、能加载、Vulkan 正常，运行 1.3 s 后 SIGSEGV（待查） |
-| B. 独立 Qt 前端 | `azahar` 可执行 + eglfs/Weston | 能编出 aarch64 产物，但 glibc 要求 2.43 > 设备 2.41（待解决） |
-| C. trixie chroot | 同一发行版内编 | 环境已建好，编译中断（WSL 反复重启） |
+| B. 独立 Qt 前端 | `azahar` 可执行 + eglfs/Weston | 已编出可用产物（glibc 2.38，见 docs/status.md），待设备实测 |
+| C. trixie chroot | 同一发行版内编 | ✅ 已跑通，产物 glibc 2.38 |
 
 已验证可用、与核心无关的部分：
 

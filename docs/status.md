@@ -30,28 +30,33 @@
 
 受影响符号：`sinhf acosf atan2f asinf sqrtf log10f`
 
-## C. trixie chroot
+## C. trixie chroot（已跑通）
 
-已建 `/root/trixie-amd64`，安装双架构 Qt 6.8.2 + aarch64 交叉 gcc，cmake 配置通过。
-ninja 编译被 WSL 反复重启打断（WSL 空闲会重启，chroot 的 /proc /dev /sys 绑定随之失效）。
+| 项 | 结果 |
+|---|---|
+| 环境 | `/root/trixie-amd64`，debootstrap amd64 trixie，双架构 Qt 6.8.2 + aarch64 交叉 gcc |
+| 配置 | cmake 通过（`CMAKE_PREFIX_PATH=/usr/lib/aarch64-linux-gnu/cmake`，无 sysroot 手工拼装） |
+| 编译 | 成功，2246 个目标 |
+| 产物 | `azahar-qt-arm64-chroot`，40 MB，sha256 `3a3908e059eca533…` |
+| **glibc 上限** | **2.38** ✅（设备 2.41） |
+| 依赖 | Qt6 Widgets / Multimedia / Gui / DBus / Concurrent / Core + libm / libmvec / libc |
 
-恢复方法：
+同一发行版内编译后，之前所有 glibc 相关坑自然消失：moc 版本、libicu、libGLX、`sqrtf@GLIBC_2.43` 都不再出现。
+
+### 断点续编
+
+WSL 会空闲重启，chroot 的挂载会丢。恢复：
 
 ```sh
 mount --bind /proc /root/trixie-amd64/proc
 mount --bind /dev  /root/trixie-amd64/dev
 mount --bind /sys  /root/trixie-amd64/sys
-chroot /root/trixie-amd64 bash -lc 'cd /build-src/azahar/build-qt && ninja azahar'
+bash scripts/resume-azahar-qt-chroot.sh
 ```
 
-## 已验证：per-core 配置
+从 Windows 调 WSL 跑脚本时必须加 `MSYS_NO_PATHCONV=1`，否则 Git Bash 会把 `/bin/bash` 转成 Windows 路径，报 127。
 
-```
-[INFO] [Override] Core-specific overrides found at ".../config/Azahar/Azahar.cfg"
-[INFO] [Environ] GET_PREFERRED_HW_RENDER, video driver: "vulkan"
-[INFO] [Video] Using HW render, vulkan driver forced.
-```
+### 设备侧还需两件事
 
-全局 `retroarch.cfg` 是 `video_driver = "gl"`，说明覆盖生效。加上
-`savefiles_in_content_dir = "false"` 后用户目录从 `/roms/3ds/Azahar/` 移到
-`~/.config/retroarch/saves/Azahar/`。
+1. 补 `libQt6Multimedia.so.6`（镜像里只有 Qt6 Core/Gui/Widgets/Quick/WaylandClient/Svg/Network/DBus），它依赖 `libpulse.so.0`
+2. 用 `QT_QPA_PLATFORM=eglfs` 直接跑，或走 Weston kiosk（Vita3K 同款）
