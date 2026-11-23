@@ -1,0 +1,6 @@
+out/
+*.so
+*.img
+*.xz
+build/
+build-*/
