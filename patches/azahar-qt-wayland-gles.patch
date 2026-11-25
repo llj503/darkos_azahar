@@ -1,0 +1,40 @@
+--- a/src/common/settings.h
++++ b/src/common/settings.h
+@@ -528,7 +528,11 @@
+         GraphicsAPI::Software, GraphicsAPI::Vulkan, Keys::graphics_api};
+     // clang-format on
+     SwitchableSetting<u32> physical_device{0, Keys::physical_device};
++#if defined(USING_GLES)
++    Setting<bool> use_gles{true, Keys::use_gles};
++#else
+     Setting<bool> use_gles{false, Keys::use_gles};
++#endif
+     Setting<bool> renderer_debug{false, Keys::renderer_debug};
+     Setting<bool> pica_debugging{false, Keys::pica_debugging};
+     Setting<bool> dump_command_buffers{false, Keys::dump_command_buffers};
+--- a/src/citra_qt/bootmanager.cpp
++++ b/src/citra_qt/bootmanager.cpp
+@@ -751,18 +751,18 @@
+     // WA_DontCreateNativeAncestors, WA_DeleteOnClose
+     auto child = new OpenGLRenderWidget(this, system, is_secondary);
+     child_widget = child;
+-    child_widget->windowHandle()->create();
+ 
+     if (!main_context) {
+         main_context = std::make_unique<OpenGLSharedContext>();
+     }
+ 
+-    auto child_context = CreateSharedContext();
+-    child->SetContext(std::move(child_context));
+-
+-    auto format = child_widget->windowHandle()->format();
++    auto format = static_cast<OpenGLSharedContext*>(main_context.get())->GetShareContext()->format();
+     format.setSwapInterval(Settings::values.use_vsync.GetValue());
+     child_widget->windowHandle()->setFormat(format);
++    child_widget->windowHandle()->create();
++
++    auto child_context = CreateSharedContext();
++    child->SetContext(std::move(child_context));
+ 
+     return true;
+ }

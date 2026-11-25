@@ -11,24 +11,43 @@ Azahar（Nintendo 3DS）在 dArkOS / RK3562 上的移植记录与构建脚本。
 
 | 路线 | 形态 | 现状 |
 |---|---|---|
-| A. libretro 核心 | RetroArch 加载 `azahar_libretro.so` | 能编、能加载、Vulkan 正常，运行 1.3 s 后 SIGSEGV（待查） |
-| B. 独立 Qt 前端 | `azahar` 可执行 + eglfs/Weston | 已编出可用产物（glibc 2.38，见 docs/status.md），待设备实测 |
-| C. trixie chroot | 同一发行版内编 | ✅ 已跑通，产物 glibc 2.38 |
+| A. libretro 核心 | RetroArch 加载 `azahar_libretro.so` | 能编、能加载、Vulkan 正常，运行约 1.3 s 后 SIGSEGV（按用户选择暂缓） |
+| B. 独立 Qt 前端 | `azahar-qt` + Wayland/Weston | **AISLPC AIS 实机通过**：可进入关卡、ALSA PCM `RUNNING`；游戏内 OSD 可反复开关，L1/R1 翻页，存档/读档、设置和每游戏覆盖可用；OSD 退出后恢复 ES；ES 的 3DS 系统可选择 `azahar-qt`（见 [docs/qt-frontend.md](docs/qt-frontend.md)） |
 
 已验证可用、与核心无关的部分：
 
+- Qt 正式版：Mali-G52 / OpenGL ES 3.2 显示，PCM `RUNNING`，Select+Start 退出后 ES、killer_daemon、ogage 和 `SPK` 输出恢复
 - per-core 配置 `config/Azahar/Azahar.cfg`：让 RetroArch 只对 Azahar 用 Vulkan，不需要 `--appendconfig` 包装
 - Vulkan ICD 选 libmali（不是 malisx2）：Azahar 在 malisx2 上慢 13–20%
+
+Qt 路线剩余人工体验和 Vulkan 验证项，详见 [docs/status.md](docs/status.md)。
 
 ## 目录
 
 ```
 config/Azahar/Azahar.cfg      # 每核心 RetroArch 覆盖配置（已验证）
 docs/status.md                # 移植现状与实测数据
+docs/qt-frontend.md           # Qt 前端：构建、运行包、设备部署与验证清单
 docs/gcc-compat.md            # 用 gcc 编 2126.2 需要改的三处
 docs/azahar-nano-osd.md       # azahar-nano 的 OSD 菜单结构分析
-scripts/                      # 构建脚本
+device/                        # 设备文件：azahar-qt.sh（Weston 启动器）、3ds.sh（ES 入口）
+scripts/ns-chroot.sh          # 免 root 的 trixie chroot（用户命名空间）
+scripts/build-azahar-qt.sh    # 交叉编译 Qt 前端
+scripts/make-azahar-qt-bundle.sh  # 连同 Qt 运行库打成设备运行包
+scripts/build-azahar-libretro.sh  # libretro 核心（仍是 WSL 版本，路径待改）
 ```
+
+## 构建（Qt 前端）
+
+在 Debian/Ubuntu 上，不需要 root：
+
+```sh
+scripts/ns-chroot.sh setup amd64
+scripts/build-azahar-qt.sh build
+scripts/make-azahar-qt-bundle.sh
+```
+
+产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `f1cb4b2088a1a878d0e08e5d13a858c32b514f3375a0a73f0f40fa542449317a`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
 
 ## 构建（libretro 核心）
 

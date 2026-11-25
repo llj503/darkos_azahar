@@ -1,0 +1,1368 @@
+diff --git a/src/citra_qt/CMakeLists.txt b/src/citra_qt/CMakeLists.txt
+index 91d8e13..0d7d07e 100644
+--- a/src/citra_qt/CMakeLists.txt
++++ b/src/citra_qt/CMakeLists.txt
+@@ -181,6 +181,8 @@ add_library(citra_qt STATIC EXCLUDE_FROM_ALL
+     multiplayer/validation.h
+     notification_led.cpp
+     notification_led.h
++    osd_overlay.cpp
++    osd_overlay.h
+     precompiled_headers.h
+     qt_image_interface.cpp
+     qt_image_interface.h
+diff --git a/src/citra_qt/citra_qt.cpp b/src/citra_qt/citra_qt.cpp
+index f75e16f..1fa5741 100644
+--- a/src/citra_qt/citra_qt.cpp
++++ b/src/citra_qt/citra_qt.cpp
+@@ -73,6 +73,7 @@
+ #include "citra_qt/movie/movie_play_dialog.h"
+ #include "citra_qt/movie/movie_record_dialog.h"
+ #include "citra_qt/multiplayer/state.h"
++#include "citra_qt/osd_overlay.h"
+ #include "citra_qt/qt_image_interface.h"
+ #include "citra_qt/qt_swizzle.h"
+ #include "citra_qt/uisettings.h"
+@@ -1507,17 +1508,26 @@ void GMainWindow::BootGame(const QString& filename) {
+     const std::string path = filename.toStdString();
+     auto loader = Loader::GetLoader(path);
+ 
++    osd_config_name.clear();
++    osd_per_game_active = false;
++    osd_game_config.reset();
++
+     u64 title_id{0};
+     Loader::ResultStatus res =
+         loader ? loader->ReadProgramId(title_id) : Loader::ResultStatus::Error;
+ 
+     if (Loader::ResultStatus::Success == res) {
+-        // Load per game settings
+         const std::string name{is_artic ? "" : FileUtil::GetFilename(filename.toStdString())};
+-        const std::string config_file_name =
+-            title_id == 0 ? name : fmt::format("{:016X}", title_id);
+-        LOG_INFO(Frontend, "Loading per application config file for title {}", config_file_name);
+-        QtConfig per_game_config(config_file_name, QtConfig::ConfigType::PerGameConfig);
++        osd_config_name = title_id == 0 ? name : fmt::format("{:016X}", title_id);
++        if (!osd_config_name.empty()) {
++            const std::string per_game_path =
++                fmt::format("{}/custom/{}.ini",
++                            FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir), osd_config_name);
++            osd_per_game_active = FileUtil::Exists(per_game_path);
++            LOG_INFO(Frontend, "Loading per application config file for title {}", osd_config_name);
++            osd_game_config =
++                std::make_unique<QtConfig>(osd_config_name, QtConfig::ConfigType::PerGameConfig);
++        }
+     }
+ 
+     // Artic Server cannot accept a client multiple times, so multiple loaders are not
+@@ -1540,7 +1550,9 @@ void GMainWindow::BootGame(const QString& filename) {
+     // Save configurations
+     UpdateUISettings();
+     game_list->SaveInterfaceLayout();
+-    config->Save();
++    if (!osd_per_game_active) {
++        config->Save();
++    }
+ 
+     if (!LoadROM(filename)) {
+         render_window->ReleaseRenderTarget();
+@@ -1623,6 +1635,73 @@ void GMainWindow::BootGame(const QString& filename) {
+         ShowFullscreen();
+     }
+ 
++    osd_overlay = new OsdOverlay(render_window, game_title, osd_per_game_active);
++    connect(osd_overlay, &OsdOverlay::pauseRequested, this, &GMainWindow::OnPauseGame);
++    connect(osd_overlay, &OsdOverlay::resumeRequested, this,
++            [this] { OnResumeGame(false); });
++    connect(osd_overlay, &OsdOverlay::saveStateRequested, this, [this](int slot) {
++        const int index = slot - 1;
++        if (!system.IsPoweredOn() || index < 0 ||
++            index >= static_cast<int>(actions_save_state.size())) {
++            return;
++        }
++        system.SendSignal(Core::System::Signal::Save, index);
++        system.frame_limiter.AdvanceFrame();
++        LOG_INFO(Frontend, "OSD save state requested for slot {}", index);
++        if (osd_overlay) {
++            osd_overlay->ShowMessage(QStringLiteral("Save State requested"));
++        }
++    });
++    connect(osd_overlay, &OsdOverlay::loadStateRequested, this, [this](int slot) {
++        const int index = slot - 1;
++        if (!system.IsPoweredOn() || index < 0 ||
++            index >= static_cast<int>(actions_load_state.size())) {
++            return;
++        }
++        system.SendSignal(Core::System::Signal::Load, index);
++        system.frame_limiter.AdvanceFrame();
++        LOG_INFO(Frontend, "OSD load state requested for slot {}", index);
++        if (osd_overlay) {
++            osd_overlay->ShowMessage(QStringLiteral("Load State requested"));
++        }
++    });
++    connect(osd_overlay, &OsdOverlay::restartRequested, this, &GMainWindow::OnRestartGame);
++    connect(osd_overlay, &OsdOverlay::exitRequested, this, [this] {
++        OnStopGame();
++        if (qEnvironmentVariable("AZAHAR_QT_SESSION") == QStringLiteral("1")) {
++            QCoreApplication::quit();
++        }
++    });
++    connect(osd_overlay, &OsdOverlay::settingsChanged, this, [this] {
++        if (osd_per_game_active && osd_game_config) {
++            osd_game_config->Save();
++        } else {
++            config->Save();
++        }
++        system.ApplySettings();
++        render_window->OnFramebufferSizeChanged();
++    });
++    connect(osd_overlay, &OsdOverlay::overrideToggleRequested, this, [this] {
++        if (!osd_overlay || osd_config_name.empty() || !osd_game_config) {
++            return;
++        }
++        if (osd_per_game_active) {
++            FileUtil::Delete(fmt::format("{}/custom/{}.ini",
++                                         FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir),
++                                         osd_config_name));
++            Settings::RestoreGlobalState(false);
++            config->Reload();
++            osd_per_game_active = false;
++        } else {
++            osd_overlay->PreparePerGameOverride();
++            osd_game_config->Save();
++            osd_per_game_active = true;
++        }
++        system.ApplySettings();
++        render_window->OnFramebufferSizeChanged();
++        osd_overlay->SetPerGameOverride(osd_per_game_active);
++    });
++
+     OnResumeGame(true);
+ }
+ 
+@@ -1631,6 +1710,16 @@ void GMainWindow::ShutdownGame() {
+         return;
+     }
+ 
++    if (osd_overlay) {
++        osd_overlay->Shutdown();
++        osd_overlay->disconnect();
++        osd_overlay->deleteLater();
++        osd_overlay = nullptr;
++    }
++    osd_game_config.reset();
++    osd_config_name.clear();
++    osd_per_game_active = false;
++
+     if (ui->action_Fullscreen->isChecked()) {
+         HideFullscreen();
+     }
+diff --git a/src/citra_qt/citra_qt.h b/src/citra_qt/citra_qt.h
+index 1179d0c..556ac3c 100644
+--- a/src/citra_qt/citra_qt.h
++++ b/src/citra_qt/citra_qt.h
+@@ -6,6 +6,7 @@
+ 
+ #include <array>
+ #include <memory>
++#include <string>
+ #include <vector>
+ #ifdef __unix__
+ #include <QDBusObjectPath>
+@@ -52,6 +53,7 @@ class LoadingScreen;
+ class MicroProfileDialog;
+ #endif
+ class MultiplayerState;
++class OsdOverlay;
+ class ProfilerWidget;
+ class QFileOpenEvent;
+ template <typename>
+@@ -376,6 +378,10 @@ private:
+     // isn't created before the check is performed
+     UserDataMigrator user_data_migrator;
+     std::unique_ptr<QtConfig> config;
++    std::unique_ptr<QtConfig> osd_game_config;
++    std::string osd_config_name;
++    bool osd_per_game_active = false;
++    OsdOverlay* osd_overlay = nullptr;
+ 
+     // Hotkeys
+     bool turbo_mode_active = false;
+diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
+new file mode 100644
+index 0000000..aef7a99
+--- /dev/null
++++ b/src/citra_qt/osd_overlay.cpp
+@@ -0,0 +1,1011 @@
++// Copyright 2026 Azahar Emulator Project
++// Licensed under GPLv2 or any later version
++// Refer to the license.txt file included.
++
++#include "citra_qt/osd_overlay.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cerrno>
++#include <cmath>
++#include <limits>
++#include <thread>
++#include <fcntl.h>
++#include <linux/input.h>
++#include <poll.h>
++#include <sys/ioctl.h>
++#include <unistd.h>
++#include <QApplication>
++#include <QDateTime>
++#include <QDir>
++#include <QFile>
++#include <QLinearGradient>
++#include <QPainter>
++#include <QPainterPath>
++#include <QTime>
++#include <QTimer>
++#include "common/logging/log.h"
++#include "common/settings.h"
++#include "core/frontend/input.h"
++
++// Reads the handheld gamepad straight from the kernel evdev node. The menu must keep
++// working even when SDL's joystick polling stalls, and evdev always delivers events.
++class EvdevGamepad {
++public:
++    static constexpr size_t kNumButtons = 12;
++
++    EvdevGamepad() {
++        for (auto& button : m_buttons) {
++            button.store(false, std::memory_order_relaxed);
++        }
++        OpenDevice();
++        RefreshButtons();
++        m_running.store(true, std::memory_order_relaxed);
++        m_thread = std::thread([this] { ReadLoop(); });
++    }
++
++    ~EvdevGamepad() {
++        m_running.store(false, std::memory_order_relaxed);
++        if (m_thread.joinable()) {
++            m_thread.join();
++        }
++        if (m_fd >= 0) {
++            ::close(m_fd);
++        }
++    }
++
++    bool GetButton(size_t index) const {
++        return index < kNumButtons && m_buttons[index].load(std::memory_order_relaxed);
++    }
++
++    std::tuple<float, float> GetStick() const {
++        const float x = m_abs_x.load(std::memory_order_relaxed) / 32767.0f;
++        const float y = -m_abs_y.load(std::memory_order_relaxed) / 32767.0f;
++        const float r2 = x * x + y * y;
++        if (r2 > 1.0f) {
++            const float r = std::sqrt(r2);
++            return {x / r, y / r};
++        }
++        return {x, y};
++    }
++
++private:
++    void OpenDevice() {
++        QDir input_dir(QStringLiteral("/sys/class/input"));
++        const auto entries = input_dir.entryList(QStringList{QStringLiteral("event*")}, QDir::Dirs);
++        for (const QString& entry : entries) {
++            QFile name_file(QStringLiteral("/sys/class/input/%1/device/name").arg(entry));
++            if (!name_file.open(QIODevice::ReadOnly)) {
++                continue;
++            }
++            const QString name = QString::fromUtf8(name_file.readAll()).trimmed();
++            name_file.close();
++            if (name != QStringLiteral("rk3562-joystick")) {
++                continue;
++            }
++            const QString path = QStringLiteral("/dev/input/%1").arg(entry);
++            m_fd = ::open(path.toLocal8Bit().constData(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
++            if (m_fd >= 0) {
++                LOG_INFO(Frontend, "OSD evdev gamepad opened {}", path.toStdString());
++                return;
++            }
++        }
++        m_fd = -1;
++    }
++
++    void RefreshButtons() {
++        unsigned long bits[(KEY_CNT + 8 * sizeof(unsigned long) - 1) /
++                           (8 * sizeof(unsigned long))]{};
++        if (m_fd < 0 || ::ioctl(m_fd, EVIOCGKEY(sizeof(bits)), bits) < 0) {
++            return;
++        }
++        static constexpr int codes[kNumButtons] = {
++            BTN_SELECT, BTN_DPAD_UP, BTN_DPAD_DOWN, BTN_DPAD_LEFT, BTN_DPAD_RIGHT,
++            BTN_EAST, BTN_SOUTH, BTN_NORTH, BTN_WEST, BTN_TL, BTN_TR, BTN_START};
++        constexpr size_t bits_per_word = 8 * sizeof(unsigned long);
++        for (size_t i = 0; i < kNumButtons; ++i) {
++            const size_t bit = static_cast<size_t>(codes[i]);
++            m_buttons[i].store((bits[bit / bits_per_word] >> (bit % bits_per_word)) & 1UL,
++                               std::memory_order_relaxed);
++        }
++        input_absinfo abs_x{};
++        input_absinfo abs_y{};
++        if (::ioctl(m_fd, EVIOCGABS(ABS_X), &abs_x) == 0) {
++            m_abs_x.store(abs_x.value, std::memory_order_relaxed);
++        }
++        if (::ioctl(m_fd, EVIOCGABS(ABS_Y), &abs_y) == 0) {
++            m_abs_y.store(abs_y.value, std::memory_order_relaxed);
++        }
++    }
++
++    void ReadLoop() {
++        using namespace std::chrono_literals;
++        while (m_running.load(std::memory_order_relaxed)) {
++            if (m_fd < 0) {
++                OpenDevice();
++                RefreshButtons();
++                if (m_fd < 0) {
++                    std::this_thread::sleep_for(200ms);
++                    continue;
++                }
++            }
++            pollfd pfd{m_fd, POLLIN, 0};
++            if (::poll(&pfd, 1, 16) > 0) {
++                input_event ev{};
++                ssize_t n;
++                while ((n = ::read(m_fd, &ev, sizeof(ev))) == static_cast<ssize_t>(sizeof(ev))) {
++                    if (ev.type == EV_KEY) {
++                        const int index = ButtonIndex(ev.code);
++                        if (index >= 0) {
++                            m_buttons[index].store(ev.value != 0, std::memory_order_relaxed);
++                        }
++                    } else if (ev.type == EV_ABS) {
++                        if (ev.code == ABS_X) {
++                            m_abs_x.store(ev.value, std::memory_order_relaxed);
++                        } else if (ev.code == ABS_Y) {
++                            m_abs_y.store(ev.value, std::memory_order_relaxed);
++                        }
++                    }
++                }
++                if (n == 0 || (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK)) {
++                    ::close(m_fd);
++                    m_fd = -1;
++                }
++            }
++            RefreshButtons();
++        }
++    }
++
++    static int ButtonIndex(int code) {
++        switch (code) {
++        case BTN_SELECT: return 0;
++        case BTN_DPAD_UP: return 1;
++        case BTN_DPAD_DOWN: return 2;
++        case BTN_DPAD_LEFT: return 3;
++        case BTN_DPAD_RIGHT: return 4;
++        // 本设备物理 A/B 与标准手柄相反：A=BTN_EAST(305)、B=BTN_SOUTH(304)，
++        // 与启动器 SDL 映射 a:b1,b:b0 一致。
++        case BTN_EAST: return 5;
++        case BTN_SOUTH: return 6;
++        case BTN_NORTH: return 7;
++        case BTN_WEST: return 8;
++        case BTN_TL: return 9;
++        case BTN_TR: return 10;
++        case BTN_START: return 11;
++        default: return -1;
++        }
++    }
++
++    std::atomic<bool> m_running{false};
++    std::thread m_thread;
++    int m_fd = -1;
++    std::array<std::atomic<bool>, kNumButtons> m_buttons{};
++    std::atomic<int> m_abs_x{0};
++    std::atomic<int> m_abs_y{0};
++};
++
++namespace {
++
++constexpr int kMainPage = 0;
++constexpr int kVideoPage = 1;
++constexpr int kAudioPage = 2;
++constexpr int kSystemPage = 3;
++constexpr int kControlsPage = 4;
++constexpr int kExitConfirmPage = 5;
++constexpr int kRestartConfirmPage = 6;
++constexpr qint64 kLongPressMs = 600;
++constexpr qint64 kRepeatDelayMs = 360;
++constexpr qint64 kRepeatIntervalMs = 110;
++
++qint64 NowMs() {
++    return std::chrono::duration_cast<std::chrono::milliseconds>(
++               std::chrono::steady_clock::now().time_since_epoch())
++        .count();
++}
++
++class EvdevButtonDevice final : public Input::ButtonDevice {
++public:
++    EvdevButtonDevice(std::shared_ptr<EvdevGamepad> gamepad, size_t index)
++        : m_gamepad{std::move(gamepad)}, m_index{index} {}
++
++    bool GetStatus() const override {
++        return m_gamepad->GetButton(m_index);
++    }
++
++private:
++    std::shared_ptr<EvdevGamepad> m_gamepad;
++    size_t m_index;
++};
++
++class EvdevAnalogDevice final : public Input::AnalogDevice {
++public:
++    explicit EvdevAnalogDevice(std::shared_ptr<EvdevGamepad> gamepad)
++        : m_gamepad{std::move(gamepad)} {}
++
++    std::tuple<float, float> GetStatus() const override {
++        return m_gamepad->GetStick();
++    }
++
++private:
++    std::shared_ptr<EvdevGamepad> m_gamepad;
++};
++
++} // namespace
++
++OsdOverlay::OsdOverlay(QWidget* parent, const QString& game_title, bool per_game_active)
++    : QWidget(parent), m_per_game_active{per_game_active}, m_game_title{game_title} {
++    setObjectName(QStringLiteral("azaharOsdOverlay"));
++    setAttribute(Qt::WA_NoSystemBackground);
++    setAttribute(Qt::WA_TranslucentBackground);
++    setAttribute(Qt::WA_TransparentForMouseEvents);
++    setAttribute(Qt::WA_AlwaysStackOnTop);
++    setAttribute(Qt::WA_NativeWindow);
++    setAttribute(Qt::WA_DontCreateNativeAncestors);
++    setFocusPolicy(Qt::NoFocus);
++    hide();
++
++    BuildPages();
++    CreateInputDevices();
++
++    m_timer = new QTimer(this);
++    m_timer->setInterval(16);
++    connect(m_timer, &QTimer::timeout, this, &OsdOverlay::PollInput);
++    m_timer->start();
++
++    m_banner_timer = new QTimer(this);
++    m_banner_timer->setSingleShot(true);
++    connect(m_banner_timer, &QTimer::timeout, this, [this] {
++        m_banner.clear();
++        repaint();
++    });
++
++    if (parent) {
++        parent->installEventFilter(this);
++        setGeometry(parent->rect());
++    }
++}
++
++OsdOverlay::~OsdOverlay() {
++    Shutdown();
++}
++
++void OsdOverlay::Shutdown() {
++    if (m_shutdown) {
++        return;
++    }
++    m_shutdown = true;
++    if (m_timer) {
++        m_timer->stop();
++    }
++    if (m_banner_timer) {
++        m_banner_timer->stop();
++    }
++    hide();
++}
++
++void OsdOverlay::SetPerGameOverride(bool active) {
++    m_per_game_active = active;
++    BuildPages();
++    m_selected = std::clamp(m_selected, 0, static_cast<int>(m_pages[m_current_page].rows.size()) - 1);
++    ShowMessage(active ? QStringLiteral("Per-game override enabled")
++                       : QStringLiteral("Per-game override removed"));
++    repaint();
++}
++
++void OsdOverlay::PreparePerGameOverride() {
++    m_per_game_active = true;
++    Snapshot(Settings::values.resolution_factor);
++    Snapshot(Settings::values.layout_option);
++    Snapshot(Settings::values.swap_screen);
++    Snapshot(Settings::values.frame_limit);
++    Snapshot(Settings::values.use_disk_shader_cache);
++    Snapshot(Settings::values.volume);
++    Snapshot(Settings::values.enable_audio_stretching);
++    Snapshot(Settings::values.enable_realtime_audio);
++    Snapshot(Settings::values.is_new_3ds);
++    Snapshot(Settings::values.cpu_clock_percentage);
++    Snapshot(Settings::values.region_value);
++}
++
++void OsdOverlay::ShowMessage(const QString& message) {
++    m_banner = message;
++    if (m_banner_timer) {
++        m_banner_timer->start(1800);
++    }
++    repaint();
++}
++
++void OsdOverlay::BuildPages() {
++    m_pages.clear();
++    m_pages.resize(7);
++    m_pages[kMainPage].title = QStringLiteral("Azahar Nano");
++    m_pages[kVideoPage].title = QStringLiteral("Video");
++    m_pages[kAudioPage].title = QStringLiteral("Audio");
++    m_pages[kSystemPage].title = QStringLiteral("System");
++    m_pages[kControlsPage].title = QStringLiteral("Controls");
++    m_pages[kExitConfirmPage].title = QStringLiteral("Exit Game");
++    m_pages[kRestartConfirmPage].title = QStringLiteral("Restart Game");
++
++    Page& main = m_pages[kMainPage];
++    AddAction(main, QStringLiteral("Resume"), QStringLiteral("Return to the game"), [this] {
++        RequestResume(Button::A);
++    });
++    AddAction(main, QStringLiteral("Save State"), QStringLiteral("Save to the selected slot"),
++              [this] { emit saveStateRequested(m_slot); });
++    AddAction(main, QStringLiteral("Load State"), QStringLiteral("Load the selected slot"),
++              [this] { emit loadStateRequested(m_slot); });
++    AddChoice(main, QStringLiteral("State Slot"), QStringLiteral("Savestate slot"),
++              QStringList{QStringLiteral("1"), QStringLiteral("2"), QStringLiteral("3"),
++                          QStringLiteral("4"), QStringLiteral("5"), QStringLiteral("6"),
++                          QStringLiteral("7"), QStringLiteral("8"), QStringLiteral("9"),
++                          QStringLiteral("10")},
++              m_slot - 1, [this](int index) { m_slot = index + 1; });
++    AddPageRow(main, QStringLiteral("Video"),
++               QStringLiteral("Resolution, layout, frame rate and shaders"), kVideoPage);
++    AddPageRow(main, QStringLiteral("Audio"), QStringLiteral("Volume and audio timing"), kAudioPage);
++    AddPageRow(main, QStringLiteral("System"), QStringLiteral("Console mode, region and CPU clock"),
++               kSystemPage);
++    AddPageRow(main, QStringLiteral("Controls"), QStringLiteral("Controller button reference"),
++               kControlsPage);
++    AddAction(main,
++              m_per_game_active ? QStringLiteral("Delete Per-Game Override")
++                                : QStringLiteral("Create Per-Game Override"),
++              m_per_game_active ? QStringLiteral("Remove this game's separate settings")
++                                : QStringLiteral("Keep changes separate for this game"),
++              [this] { emit overrideToggleRequested(); });
++    AddPageRow(main, QStringLiteral("Restart Game"), QStringLiteral("Start this game again"),
++               kRestartConfirmPage);
++    AddPageRow(main, QStringLiteral("Exit Game"), QStringLiteral("Return to the game list"),
++               kExitConfirmPage);
++
++    Page& video = m_pages[kVideoPage];
++    AddChoice(video, QStringLiteral("Resolution"), QStringLiteral("Internal rendering resolution"),
++              Settings::values.resolution_factor,
++              {{QStringLiteral("Native"), 1u},
++               {QStringLiteral("2x"), 2u},
++               {QStringLiteral("3x"), 3u},
++               {QStringLiteral("4x"), 4u}});
++    AddChoice(video, QStringLiteral("Screen Layout"), QStringLiteral("Arrangement of both screens"),
++              Settings::values.layout_option,
++              {{QStringLiteral("Default"), Settings::LayoutOption::Default},
++               {QStringLiteral("Single Screen"), Settings::LayoutOption::SingleScreen},
++               {QStringLiteral("Large Screen"), Settings::LayoutOption::LargeScreen},
++               {QStringLiteral("Side Screen"), Settings::LayoutOption::SideScreen},
++               {QStringLiteral("Hybrid Screen"), Settings::LayoutOption::HybridScreen}});
++    AddToggle(video, QStringLiteral("Swap Screens"), QStringLiteral("Swap the upper and lower screens"),
++              Settings::values.swap_screen);
++    AddChoice(video, QStringLiteral("Frame Limit"), QStringLiteral("Maximum emulation frame rate"),
++              Settings::values.frame_limit,
++              {{QStringLiteral("30 FPS"), 30.0},
++               {QStringLiteral("60 FPS"), 60.0},
++               {QStringLiteral("100 FPS"), 100.0},
++               {QStringLiteral("120 FPS"), 120.0},
++               {QStringLiteral("144 FPS"), 144.0},
++               {QStringLiteral("200 FPS"), 200.0}});
++    AddToggle(video, QStringLiteral("Shader Cache"),
++              QStringLiteral("Cache compiled shaders on disk for faster startup"),
++              Settings::values.use_disk_shader_cache);
++
++    Page& audio = m_pages[kAudioPage];
++    std::vector<std::pair<QString, float>> volume_choices;
++    for (int percent = 0; percent <= 100; percent += 10) {
++        volume_choices.emplace_back(QStringLiteral("%1%").arg(percent), percent / 100.0f);
++    }
++    AddChoice(audio, QStringLiteral("Volume"), QStringLiteral("Game audio volume"),
++              Settings::values.volume, volume_choices);
++    AddToggle(audio, QStringLiteral("Audio Stretching"),
++              QStringLiteral("Stretch audio to match emulation speed"),
++              Settings::values.enable_audio_stretching);
++    AddToggle(audio, QStringLiteral("Realtime Audio"),
++              QStringLiteral("Scale audio using real elapsed time"),
++              Settings::values.enable_realtime_audio);
++
++    Page& system = m_pages[kSystemPage];
++    AddToggle(system, QStringLiteral("New 3DS Mode"),
++              QStringLiteral("Use New 3DS CPU and memory limits"), Settings::values.is_new_3ds);
++    AddChoice(system, QStringLiteral("CPU Clock"), QStringLiteral("Emulated CPU clock percentage"),
++              Settings::values.cpu_clock_percentage,
++              {{QStringLiteral("50%"), 50},
++               {QStringLiteral("75%"), 75},
++               {QStringLiteral("100%"), 100},
++               {QStringLiteral("150%"), 150},
++               {QStringLiteral("200%"), 200},
++               {QStringLiteral("300%"), 300},
++               {QStringLiteral("400%"), 400}});
++    AddChoice(system, QStringLiteral("Region"), QStringLiteral("Console region"),
++              Settings::values.region_value,
++              {{QStringLiteral("Auto"), Settings::REGION_VALUE_AUTO_SELECT},
++               {QStringLiteral("Japan"), 0},
++               {QStringLiteral("USA"), 1},
++               {QStringLiteral("Europe"), 2},
++               {QStringLiteral("Australia"), 3},
++               {QStringLiteral("China"), 4},
++               {QStringLiteral("Korea"), 5}});
++    AddInfo(system, QStringLiteral("Some system settings apply on the next game launch."));
++
++    Page& controls = m_pages[kControlsPage];
++    AddInfo(controls, QStringLiteral("Navigate: D-pad or left stick"));
++    AddInfo(controls, QStringLiteral("Select / activate: A"));
++    AddInfo(controls, QStringLiteral("Back / resume: B"));
++    AddInfo(controls, QStringLiteral("Adjust value: Left / Right"));
++    AddInfo(controls, QStringLiteral("Change tab: X / Y"));
++    AddInfo(controls, QStringLiteral("Open menu: short Select"));
++    AddInfo(controls, QStringLiteral("Close menu: short Select"));
++    AddInfo(controls, QStringLiteral("Exit game: hold Select"));
++
++    Page& exit_confirm = m_pages[kExitConfirmPage];
++    AddInfo(exit_confirm, QStringLiteral("Unsaved progress will be lost."));
++    AddAction(exit_confirm, QStringLiteral("Yes, Exit Game"), QStringLiteral("Return to the game list"),
++              [this] {
++                  hide();
++                  m_open = false;
++                  emit exitRequested();
++              });
++    AddAction(exit_confirm, QStringLiteral("Cancel"), QStringLiteral("Return to the menu"),
++              [this] { GoBack(); });
++
++    Page& restart_confirm = m_pages[kRestartConfirmPage];
++    AddInfo(restart_confirm, QStringLiteral("The game will start again from its title screen."));
++    AddAction(restart_confirm, QStringLiteral("Yes, Restart Game"), QStringLiteral("Restart now"),
++              [this] {
++                  hide();
++                  m_open = false;
++                  emit restartRequested();
++              });
++    AddAction(restart_confirm, QStringLiteral("Cancel"), QStringLiteral("Return to the menu"),
++              [this] { GoBack(); });
++
++    m_current_page = std::clamp(m_current_page, 0, static_cast<int>(m_pages.size()) - 1);
++    m_selected = std::clamp(m_selected, 0, static_cast<int>(m_pages[m_current_page].rows.size()) - 1);
++    m_scroll = 0;
++}
++
++void OsdOverlay::AddAction(Page& page, const QString& label, const QString& hint,
++                           std::function<void()> activate) {
++    Row row;
++    row.kind = RowKind::Action;
++    row.label = label;
++    row.hint = hint;
++    row.activate = std::move(activate);
++    page.rows.push_back(std::move(row));
++}
++
++void OsdOverlay::AddInfo(Page& page, const QString& label, const QString& hint) {
++    Row row;
++    row.kind = RowKind::Info;
++    row.label = label;
++    row.hint = hint;
++    page.rows.push_back(std::move(row));
++}
++
++void OsdOverlay::AddPageRow(Page& page, const QString& label, const QString& hint, int target) {
++    Row row;
++    row.kind = RowKind::Page;
++    row.label = label;
++    row.hint = hint;
++    row.page = target;
++    page.rows.push_back(std::move(row));
++}
++
++void OsdOverlay::AddChoice(Page& page, const QString& label, const QString& hint,
++                           const QStringList& choices, int selected,
++                           std::function<void(int)> change) {
++    Row row;
++    row.kind = RowKind::Choice;
++    row.label = label;
++    row.hint = hint;
++    row.choices = choices;
++    row.selected = std::clamp(selected, 0, static_cast<int>(choices.size()) - 1);
++    row.change = std::move(change);
++    page.rows.push_back(std::move(row));
++}
++
++template <typename Type, bool ranged>
++void OsdOverlay::AddChoice(Page& page, const QString& label, const QString& hint,
++                           Settings::SwitchableSetting<Type, ranged>& setting,
++                           const std::vector<std::pair<QString, Type>>& choices) {
++    QStringList labels;
++    std::vector<Type> values;
++    labels.reserve(static_cast<qsizetype>(choices.size()));
++    values.reserve(choices.size());
++    int selected = 0;
++    double best_distance = std::numeric_limits<double>::infinity();
++    for (size_t i = 0; i < choices.size(); ++i) {
++        labels.append(choices[i].first);
++        values.push_back(choices[i].second);
++        const double distance =
++            std::abs(static_cast<double>(setting.GetValue()) - static_cast<double>(choices[i].second));
++        if (distance < best_distance) {
++            best_distance = distance;
++            selected = static_cast<int>(i);
++        }
++    }
++    AddChoice(page, label, hint, labels, selected, [this, &setting, values](int index) {
++        if (index < 0 || static_cast<size_t>(index) >= values.size()) {
++            return;
++        }
++        Assign(setting, values[index]);
++        emit settingsChanged();
++        ShowMessage(QStringLiteral("Setting saved"));
++    });
++}
++
++template <typename Type, bool ranged>
++void OsdOverlay::AddToggle(Page& page, const QString& label, const QString& hint,
++                           Settings::SwitchableSetting<Type, ranged>& setting) {
++    AddChoice(page, label, hint, setting,
++              {{QStringLiteral("Off"), Type{0}}, {QStringLiteral("On"), Type{1}}});
++}
++
++template <typename Type, bool ranged>
++void OsdOverlay::Assign(Settings::SwitchableSetting<Type, ranged>& setting, const Type& value) {
++    setting.SetGlobal(!m_per_game_active);
++    setting.SetValue(value);
++    LOG_INFO(Frontend, "OSD setting {}={} per_game={}", setting.GetLabel(), value,
++             m_per_game_active);
++}
++
++template <typename Type, bool ranged>
++void OsdOverlay::Snapshot(Settings::SwitchableSetting<Type, ranged>& setting) {
++    const Type value = setting.GetValue();
++    setting.SetGlobal(false);
++    setting.SetValue(value);
++}
++
++void OsdOverlay::CreateInputDevices() {
++    m_gamepad = std::make_shared<EvdevGamepad>();
++    for (size_t i = 0; i < m_buttons.size(); ++i) {
++        m_buttons[i] = std::make_unique<EvdevButtonDevice>(m_gamepad, i);
++    }
++    m_stick = std::make_unique<EvdevAnalogDevice>(m_gamepad);
++}
++
++void OsdOverlay::PollInput() {
++    const qint64 now = NowMs();
++    if (m_shutdown || !parentWidget() || !parentWidget()->isVisible()) {
++        return;
++    }
++
++    for (size_t i = 0; i < m_buttons.size(); ++i) {
++        const bool down = m_buttons[i] && m_buttons[i]->GetStatus();
++        HandleButton(static_cast<Button>(i), down, m_button_down[i], now);
++        m_button_down[i] = down;
++        if (m_shutdown) {
++            return;
++        }
++    }
++
++    if (m_stick) {
++        const auto [x, y] = m_stick->GetStatus();
++        const float old_x = m_stick_x;
++        const float old_y = m_stick_y;
++        m_stick_x = x;
++        m_stick_y = y;
++        if (m_open && !m_resume_pending) {
++            if (x < -0.55f && old_x >= -0.35f) {
++                MoveSelection(-1);
++            } else if (x > 0.55f && old_x <= 0.35f) {
++                MoveSelection(1);
++            }
++            if (y > 0.55f && old_y <= 0.35f) {
++                MoveSelection(-1);
++            } else if (y < -0.55f && old_y >= -0.35f) {
++                MoveSelection(1);
++            }
++        }
++    }
++
++    if (m_resume_pending && !m_button_down[static_cast<size_t>(m_resume_button)]) {
++        FinishResume();
++    }
++}
++
++void OsdOverlay::HandleButton(Button button, bool down, bool was_down, qint64 now) {
++    const size_t index = static_cast<size_t>(button);
++    if (button == Button::Select) {
++        if (down && !was_down) {
++            m_select_pressed_at = now;
++            m_select_long_fired = false;
++        }
++        if (down && !m_select_long_fired && now - m_select_pressed_at >= kLongPressMs) {
++            m_select_long_fired = true;
++            m_open = false;
++            hide();
++            emit exitRequested();
++            return;
++        }
++        if (!down && was_down && !m_select_long_fired &&
++            now - m_select_pressed_at < kLongPressMs) {
++            if (m_open) {
++                RequestResume(Button::Select);
++            } else {
++                OpenMenu();
++            }
++        }
++        return;
++    }
++
++    if (!m_open || m_resume_pending) {
++        return;
++    }
++
++    if (down && !was_down) {
++        m_button_pressed_at[index] = now;
++        m_button_last_repeat[index] = now;
++    }
++
++    const bool rising = down && !was_down;
++    const bool repeat = down && was_down && now - m_button_pressed_at[index] >= kRepeatDelayMs &&
++                        now - m_button_last_repeat[index] >= kRepeatIntervalMs;
++    if (repeat) {
++        m_button_last_repeat[index] = now;
++    }
++
++    switch (button) {
++    case Button::Up:
++        if (rising || repeat) {
++            MoveSelection(-1);
++        }
++        break;
++    case Button::Down:
++        if (rising || repeat) {
++            MoveSelection(1);
++        }
++        break;
++    case Button::Left:
++        if (rising || repeat) {
++            ChangeChoice(-1);
++        }
++        break;
++    case Button::Right:
++        if (rising || repeat) {
++            ChangeChoice(1);
++        }
++        break;
++    case Button::A:
++        if (rising) {
++            ActivateSelected();
++        }
++        break;
++    case Button::B:
++        if (rising) {
++            GoBack();
++        }
++        break;
++    case Button::X:
++        if (rising) {
++            SwitchPage(-1);
++        }
++        break;
++    case Button::Y:
++        if (rising) {
++            SwitchPage(1);
++        }
++        break;
++    case Button::L1:
++        if (rising) {
++            SwitchPage(-1);
++        }
++        break;
++    case Button::R1:
++        if (rising) {
++            SwitchPage(1);
++        }
++        break;
++    case Button::Start:
++        if (rising) {
++            RequestResume(Button::Start);
++        }
++        break;
++    default:
++        break;
++    }
++}
++
++void OsdOverlay::OpenMenu() {
++    if (m_shutdown || !parentWidget() || !parentWidget()->isVisible()) {
++        return;
++    }
++    m_open = true;
++    m_resume_pending = false;
++    m_current_page = kMainPage;
++    m_previous_page = kMainPage;
++    m_selected = 0;
++    m_scroll = 0;
++    m_banner.clear();
++    BuildPages();
++    LOG_INFO(Frontend, "OSD opened");
++    show();
++    raise();
++    repaint();
++    emit pauseRequested();
++}
++
++void OsdOverlay::RequestResume(Button button) {
++    if (!m_open || m_resume_pending) {
++        return;
++    }
++    m_resume_pending = true;
++    m_resume_button = button;
++    ShowMessage(QStringLiteral("Release buttons to resume"));
++    repaint();
++}
++
++void OsdOverlay::FinishResume() {
++    if (!m_resume_pending) {
++        return;
++    }
++    m_resume_pending = false;
++    m_open = false;
++    LOG_INFO(Frontend, "OSD resumed");
++    hide();
++    emit resumeRequested();
++}
++
++void OsdOverlay::MoveSelection(int delta) {
++    auto& rows = m_pages[m_current_page].rows;
++    if (rows.empty()) {
++        return;
++    }
++    m_selected = (m_selected + delta + static_cast<int>(rows.size())) % rows.size();
++    const int row_height = std::max(28, ListRect().height() / 10);
++    const int visible_rows = std::max(1, ListRect().height() / row_height);
++    if (m_selected < m_scroll) {
++        m_scroll = m_selected;
++    } else if (m_selected >= m_scroll + visible_rows) {
++        m_scroll = m_selected - visible_rows + 1;
++    }
++    repaint();
++}
++
++void OsdOverlay::ChangeChoice(int delta) {
++    Row& row = m_pages[m_current_page].rows[m_selected];
++    if (row.kind == RowKind::Choice && !row.choices.isEmpty()) {
++        row.selected = (row.selected + delta + row.choices.size()) % row.choices.size();
++        row.change(row.selected);
++        repaint();
++    } else if (row.kind != RowKind::Choice) {
++        SwitchPage(delta);
++    }
++}
++
++void OsdOverlay::ActivateSelected() {
++    Row& row = m_pages[m_current_page].rows[m_selected];
++    switch (row.kind) {
++    case RowKind::Action:
++        row.activate();
++        break;
++    case RowKind::Choice:
++        ChangeChoice(1);
++        break;
++    case RowKind::Page:
++        OpenPage(row.page);
++        break;
++    case RowKind::Info:
++        break;
++    }
++    repaint();
++}
++
++void OsdOverlay::OpenPage(int page) {
++    if (page < 0 || page >= static_cast<int>(m_pages.size()) || page == m_current_page) {
++        return;
++    }
++    m_previous_page = m_current_page;
++    m_previous_selection = m_selected;
++    m_current_page = page;
++    m_selected = page == kExitConfirmPage || page == kRestartConfirmPage ? 1 : 0;
++    m_scroll = 0;
++    repaint();
++}
++
++void OsdOverlay::GoBack() {
++    if (m_current_page == kMainPage) {
++        RequestResume(Button::B);
++        return;
++    }
++    m_current_page = m_previous_page;
++    m_selected = m_previous_selection;
++    m_scroll = 0;
++    repaint();
++}
++
++void OsdOverlay::SwitchPage(int delta) {
++    if (m_current_page > kControlsPage) {
++        return;
++    }
++    int page = (m_current_page + delta + kControlsPage + 1) % (kControlsPage + 1);
++    if (page == m_current_page) {
++        return;
++    }
++    m_previous_page = kMainPage;
++    m_previous_selection = 0;
++    m_current_page = page;
++    m_selected = 0;
++    m_scroll = 0;
++    repaint();
++}
++
++void OsdOverlay::ReadBattery() {
++    const qint64 now = NowMs();
++    if (now - m_last_battery_read < 5000) {
++        return;
++    }
++    m_last_battery_read = now;
++    for (const QString& path : {QStringLiteral("/sys/class/power_supply/battery/capacity"),
++                                QStringLiteral("/sys/class/power_supply/bms/capacity")}) {
++        QFile file(path);
++        if (file.open(QIODevice::ReadOnly)) {
++            bool ok = false;
++            const int value = file.readAll().trimmed().toInt(&ok);
++            if (ok) {
++                m_battery = std::clamp(value, 0, 100);
++                return;
++            }
++        }
++    }
++    m_battery = -1;
++}
++
++QRect OsdOverlay::PanelRect() const {
++    const int panel_width = std::min(900, std::max(320, width() - 48));
++    const int panel_height = std::min(650, std::max(300, height() - 48));
++    return QRect((width() - panel_width) / 2, (height() - panel_height) / 2, panel_width,
++                 panel_height);
++}
++
++QRect OsdOverlay::ListRect() const {
++    const QRect panel = PanelRect();
++    const qreal scale = std::clamp(std::min(width() / 1024.0, height() / 768.0), 0.75, 1.35);
++    return QRect(panel.left() + static_cast<int>(24 * scale),
++                 panel.top() + static_cast<int>(126 * scale),
++                 panel.width() - static_cast<int>(48 * scale),
++                 panel.height() - static_cast<int>(202 * scale));
++}
++
++void OsdOverlay::paintEvent(QPaintEvent*) {
++    QPainter painter(this);
++    painter.setRenderHint(QPainter::Antialiasing);
++    painter.fillRect(rect(), QColor(0, 0, 0, 155));
++
++    const qreal scale = std::clamp(std::min(width() / 1024.0, height() / 768.0), 0.75, 1.35);
++    const QRect panel = PanelRect();
++    QPainterPath panel_path;
++    panel_path.addRoundedRect(panel, static_cast<int>(18 * scale), static_cast<int>(18 * scale));
++    painter.fillPath(panel_path, QColor(13, 18, 27, 246));
++    painter.setPen(QPen(QColor(72, 205, 231, 220), static_cast<qreal>(2 * scale)));
++    painter.drawPath(panel_path);
++
++    QFont title_font = QApplication::font();
++    title_font.setPixelSize(static_cast<int>(29 * scale));
++    title_font.setBold(true);
++    painter.setFont(title_font);
++    painter.setPen(QColor(245, 248, 252));
++    painter.drawText(panel.left() + static_cast<int>(28 * scale),
++                     panel.top() + static_cast<int>(43 * scale), m_pages[m_current_page].title);
++
++    QFont small_font = QApplication::font();
++    small_font.setPixelSize(static_cast<int>(15 * scale));
++    painter.setFont(small_font);
++    painter.setPen(QColor(151, 165, 184));
++    const QString subtitle = m_game_title.left(70);
++    painter.drawText(panel.left() + static_cast<int>(29 * scale),
++                     panel.top() + static_cast<int>(65 * scale),
++                     painter.fontMetrics().elidedText(subtitle, Qt::ElideRight,
++                                                      panel.width() / 2));
++
++    ReadBattery();
++    QString status = QTime::currentTime().toString(QStringLiteral("HH:mm"));
++    if (m_battery >= 0) {
++        status += QStringLiteral("  %1%").arg(m_battery);
++    }
++    painter.setPen(QColor(190, 207, 220));
++    painter.drawText(panel.right() - static_cast<int>(28 * scale) -
++                         painter.fontMetrics().horizontalAdvance(status),
++                     panel.top() + static_cast<int>(43 * scale), status);
++
++    const QStringList tabs{QStringLiteral("Main"), QStringLiteral("Video"), QStringLiteral("Audio"),
++                           QStringLiteral("System"), QStringLiteral("Controls")};
++    const int tabs_left = panel.left() + static_cast<int>(24 * scale);
++    const int tabs_top = panel.top() + static_cast<int>(80 * scale);
++    const int tab_width = (panel.width() - static_cast<int>(48 * scale)) / tabs.size();
++    QFont tab_font = small_font;
++    tab_font.setPixelSize(static_cast<int>(17 * scale));
++    tab_font.setBold(true);
++    painter.setFont(tab_font);
++    for (int i = 0; i < tabs.size(); ++i) {
++        const QRect tab(tabs_left + i * tab_width, tabs_top, tab_width - 4,
++                        static_cast<int>(38 * scale));
++        if (i == m_current_page) {
++            painter.fillRect(tab, QColor(43, 182, 207, 42));
++            painter.setPen(QColor(80, 220, 242));
++            painter.drawLine(tab.left(), tab.bottom(), tab.right(), tab.bottom());
++        } else {
++            painter.setPen(QColor(127, 143, 163));
++        }
++        painter.drawText(tab, Qt::AlignHCenter | Qt::AlignVCenter, tabs[i]);
++    }
++
++    const QRect list = ListRect();
++    const int row_height = static_cast<int>(45 * scale);
++    const int visible_rows = std::max(1, list.height() / row_height);
++    const auto& rows = m_pages[m_current_page].rows;
++    m_scroll = std::clamp(m_scroll, 0, std::max(0, static_cast<int>(rows.size()) - visible_rows));
++
++    QFont row_font = QApplication::font();
++    row_font.setPixelSize(static_cast<int>(20 * scale));
++    painter.setFont(row_font);
++    for (int visible = 0; visible < visible_rows; ++visible) {
++        const int index = m_scroll + visible;
++        if (index >= static_cast<int>(rows.size())) {
++            break;
++        }
++        const Row& row = rows[index];
++        const QRect row_rect(list.left(), list.top() + visible * row_height, list.width(), row_height - 3);
++        const bool selected = index == m_selected;
++        if (selected) {
++            QPainterPath selection_path;
++            selection_path.addRoundedRect(row_rect, static_cast<int>(8 * scale),
++                                          static_cast<int>(8 * scale));
++            painter.fillPath(selection_path, QColor(38, 185, 211, 48));
++            painter.setPen(QPen(QColor(70, 214, 237, 190), static_cast<qreal>(1.5 * scale)));
++            painter.drawPath(selection_path);
++            painter.fillRect(row_rect.left(), row_rect.top() + static_cast<int>(7 * scale),
++                             static_cast<int>(4 * scale), row_rect.height() - static_cast<int>(14 * scale),
++                             QColor(75, 221, 242));
++        }
++
++        QColor text_color = row.kind == RowKind::Info ? QColor(151, 165, 184) : QColor(231, 237, 245);
++        if (selected) {
++            text_color = QColor(255, 255, 255);
++        }
++        painter.setPen(text_color);
++        QString value;
++        if (row.kind == RowKind::Choice && !row.choices.isEmpty()) {
++            value = row.choices[row.selected];
++        } else if (row.kind == RowKind::Page) {
++            value = QStringLiteral(">");
++        }
++        const int value_width = value.isEmpty() ? 0 : painter.fontMetrics().horizontalAdvance(value) +
++                                                       static_cast<int>(18 * scale);
++        const QString label = painter.fontMetrics().elidedText(
++            row.label, Qt::ElideRight, row_rect.width() - static_cast<int>(36 * scale) - value_width);
++        painter.drawText(row_rect.left() + static_cast<int>(18 * scale), row_rect.center().y() +
++                         painter.fontMetrics().ascent() / 2 - painter.fontMetrics().descent(), label);
++        if (!value.isEmpty()) {
++            painter.setPen(selected ? QColor(100, 231, 250) : QColor(103, 205, 224));
++            painter.drawText(row_rect.right() - static_cast<int>(16 * scale) -
++                                 painter.fontMetrics().horizontalAdvance(value),
++                             row_rect.center().y() + painter.fontMetrics().ascent() / 2 -
++                                 painter.fontMetrics().descent(),
++                             value);
++        }
++    }
++
++    const QRect footer = panel.adjusted(static_cast<int>(24 * scale), 0,
++                                        -static_cast<int>(24 * scale), -static_cast<int>(14 * scale));
++    painter.setFont(small_font);
++    QString hint = m_banner;
++    if (hint.isEmpty() && m_selected < static_cast<int>(rows.size())) {
++        hint = rows[m_selected].hint;
++    }
++    painter.setPen(hint.isEmpty() ? QColor(132, 148, 167) : QColor(100, 222, 241));
++    const QString hint_text = painter.fontMetrics().elidedText(hint, Qt::ElideRight, footer.width());
++    painter.drawText(footer.left(), panel.bottom() - static_cast<int>(53 * scale), hint_text);
++    painter.setPen(QColor(145, 159, 178));
++    const QString controls = QStringLiteral(
++        "D-pad / Stick: Navigate    L1 / R1: Page    Left / Right: Adjust    A: Select    B: "
++        "Back    Select: Menu");
++    painter.drawText(footer.left(), panel.bottom() - static_cast<int>(29 * scale),
++                     painter.fontMetrics().elidedText(controls, Qt::ElideRight, footer.width()));
++}
++
++bool OsdOverlay::eventFilter(QObject* watched, QEvent* event) {
++    if (watched == parentWidget() && event->type() == QEvent::Resize) {
++        setGeometry(parentWidget()->rect());
++        if (m_open) {
++            raise();
++        }
++    }
++    return QWidget::eventFilter(watched, event);
++}
+diff --git a/src/citra_qt/osd_overlay.h b/src/citra_qt/osd_overlay.h
+new file mode 100644
+index 0000000..f48cf08
+--- /dev/null
++++ b/src/citra_qt/osd_overlay.h
+@@ -0,0 +1,155 @@
++// Copyright 2026 Azahar Emulator Project
++// Licensed under GPLv2 or any later version
++// Refer to the license.txt file included.
++
++#pragma once
++
++#include <array>
++#include <chrono>
++#include <functional>
++#include <memory>
++#include <utility>
++#include <vector>
++#include <QStringList>
++#include <QWidget>
++#include "core/frontend/input.h"
++
++class QTimer;
++class EvdevGamepad;
++
++namespace Settings {
++template <typename Type, bool ranged>
++class SwitchableSetting;
++}
++
++class OsdOverlay final : public QWidget {
++    Q_OBJECT
++
++public:
++    explicit OsdOverlay(QWidget* parent, const QString& game_title, bool per_game_active);
++    ~OsdOverlay() override;
++
++    void SetPerGameOverride(bool active);
++    void PreparePerGameOverride();
++    void Shutdown();
++
++public slots:
++    void ShowMessage(const QString& message);
++
++signals:
++    void pauseRequested();
++    void resumeRequested();
++    void saveStateRequested(int slot);
++    void loadStateRequested(int slot);
++    void restartRequested();
++    void exitRequested();
++    void settingsChanged();
++    void overrideToggleRequested();
++
++protected:
++    void paintEvent(QPaintEvent* event) override;
++    bool eventFilter(QObject* watched, QEvent* event) override;
++
++private:
++    enum class RowKind { Action, Choice, Page, Info };
++    enum class Button {
++        Select,
++        Up,
++        Down,
++        Left,
++        Right,
++        A,
++        B,
++        X,
++        Y,
++        L1,
++        R1,
++        Start,
++        Count,
++    };
++
++    struct Row {
++        RowKind kind = RowKind::Info;
++        QString label;
++        QString hint;
++        QStringList choices;
++        int selected = 0;
++        int page = 0;
++        std::function<void()> activate;
++        std::function<void(int)> change;
++    };
++
++    struct Page {
++        QString title;
++        std::vector<Row> rows;
++    };
++
++    void BuildPages();
++    void AddAction(Page& page, const QString& label, const QString& hint,
++                   std::function<void()> activate);
++    void AddInfo(Page& page, const QString& label, const QString& hint = {});
++    void AddPageRow(Page& page, const QString& label, const QString& hint, int target);
++    void AddChoice(Page& page, const QString& label, const QString& hint,
++                   const QStringList& choices, int selected, std::function<void(int)> change);
++
++    template <typename Type, bool ranged>
++    void AddChoice(Page& page, const QString& label, const QString& hint,
++                   Settings::SwitchableSetting<Type, ranged>& setting,
++                   const std::vector<std::pair<QString, Type>>& choices);
++
++    template <typename Type, bool ranged>
++    void AddToggle(Page& page, const QString& label, const QString& hint,
++                   Settings::SwitchableSetting<Type, ranged>& setting);
++
++    template <typename Type, bool ranged>
++    void Assign(Settings::SwitchableSetting<Type, ranged>& setting, const Type& value);
++
++    template <typename Type, bool ranged>
++    void Snapshot(Settings::SwitchableSetting<Type, ranged>& setting);
++
++    void CreateInputDevices();
++    void PollInput();
++    void HandleButton(Button button, bool down, bool was_down, qint64 now);
++    void OpenMenu();
++    void RequestResume(Button button);
++    void FinishResume();
++    void MoveSelection(int delta);
++    void ChangeChoice(int delta);
++    void ActivateSelected();
++    void OpenPage(int page);
++    void GoBack();
++    void SwitchPage(int delta);
++    void ReadBattery();
++    QRect PanelRect() const;
++    QRect ListRect() const;
++
++    std::vector<Page> m_pages;
++    int m_current_page = 0;
++    int m_previous_page = 0;
++    int m_previous_selection = 0;
++    int m_selected = 0;
++    int m_scroll = 0;
++    int m_slot = 1;
++    bool m_per_game_active;
++    bool m_open = false;
++    bool m_resume_pending = false;
++    Button m_resume_button = Button::Select;
++    bool m_select_long_fired = false;
++    bool m_shutdown = false;
++    qint64 m_select_pressed_at = 0;
++    QString m_game_title;
++    QString m_banner;
++    int m_battery = -1;
++    qint64 m_last_battery_read = 0;
++
++    std::shared_ptr<EvdevGamepad> m_gamepad;
++    std::array<std::unique_ptr<Input::ButtonDevice>, static_cast<size_t>(Button::Count)> m_buttons;
++    std::array<bool, static_cast<size_t>(Button::Count)> m_button_down{};
++    std::array<qint64, static_cast<size_t>(Button::Count)> m_button_pressed_at{};
++    std::array<qint64, static_cast<size_t>(Button::Count)> m_button_last_repeat{};
++    std::unique_ptr<Input::AnalogDevice> m_stick;
++    float m_stick_x = 0.0f;
++    float m_stick_y = 0.0f;
++    QTimer* m_timer = nullptr;
++    QTimer* m_banner_timer = nullptr;
++};

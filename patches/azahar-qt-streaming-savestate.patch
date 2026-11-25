@@ -1,0 +1,349 @@
+diff --git a/src/common/zstd_compression.cpp b/src/common/zstd_compression.cpp
+index fa1ca6a..049b62e 100644
+--- a/src/common/zstd_compression.cpp
++++ b/src/common/zstd_compression.cpp
+@@ -6,10 +6,12 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <algorithm>
+ #include <chrono>
+ #include <ctime>
+ #include <mutex>
++#include <memory>
+ #include <sstream>
+ #include <zstd.h>
+ #include <zstd_seekable.h>
+@@ -52,6 +54,51 @@ std::vector<u8> CompressDataZSTDDefault(std::span<const u8> source) {
+     return CompressDataZSTD(source, ZSTD_CLEVEL_DEFAULT);
+ }
+ 
++bool CompressDataZSTD(std::istream& source, std::ostream& destination, u64 source_size) {
++    std::unique_ptr<ZSTD_CCtx, decltype(&ZSTD_freeCCtx)> context{ZSTD_createCCtx(), ZSTD_freeCCtx};
++    if (!context || ZSTD_isError(ZSTD_CCtx_setParameter(context.get(), ZSTD_c_compressionLevel,
++                                                          ZSTD_CLEVEL_DEFAULT)) ||
++        ZSTD_isError(ZSTD_CCtx_setPledgedSrcSize(context.get(), source_size))) {
++        LOG_ERROR(Common, "Could not initialize streaming ZSTD compression");
++        return false;
++    }
++
++    std::vector<u8> input_buffer(ZSTD_CStreamInSize());
++    std::vector<u8> output_buffer(ZSTD_CStreamOutSize());
++    u64 total_read = 0;
++    for (;;) {
++        const std::size_t amount = static_cast<std::size_t>(
++            std::min<u64>(input_buffer.size(), source_size - total_read));
++        source.read(reinterpret_cast<char*>(input_buffer.data()), amount);
++        if (source.gcount() != static_cast<std::streamsize>(amount)) {
++            LOG_ERROR(Common, "Streaming ZSTD source ended after {} of {} bytes", total_read,
++                      source_size);
++            return false;
++        }
++        total_read += amount;
++        ZSTD_inBuffer in{input_buffer.data(), amount, 0};
++        const ZSTD_EndDirective directive = total_read == source_size ? ZSTD_e_end : ZSTD_e_continue;
++        std::size_t remaining;
++        do {
++            ZSTD_outBuffer out{output_buffer.data(), output_buffer.size(), 0};
++            remaining = ZSTD_compressStream2(context.get(), &out, &in, directive);
++            if (ZSTD_isError(remaining)) {
++                LOG_ERROR(Common, "Streaming ZSTD compression failed: {}",
++                          ZSTD_getErrorName(remaining));
++                return false;
++            }
++            destination.write(reinterpret_cast<const char*>(output_buffer.data()), out.pos);
++            if (!destination) {
++                LOG_ERROR(Common, "Could not write streaming ZSTD output");
++                return false;
++            }
++        } while (in.pos < in.size || (directive == ZSTD_e_end && remaining != 0));
++        if (directive == ZSTD_e_end) {
++            return true;
++        }
++    }
++}
++
+ std::size_t GetDecompressedSize(std::span<const u8> compressed) {
+     return ZSTD_getFrameContentSize(compressed.data(), compressed.size());
+ }
+@@ -87,6 +134,57 @@ std::vector<u8> DecompressDataZSTD(std::span<const u8> compressed) {
+     return decompressed;
+ }
+ 
++bool DecompressDataZSTD(std::istream& source, std::ostream& destination) {
++    std::unique_ptr<ZSTD_DCtx, decltype(&ZSTD_freeDCtx)> context{ZSTD_createDCtx(), ZSTD_freeDCtx};
++    if (!context || ZSTD_isError(ZSTD_initDStream(context.get()))) {
++        LOG_ERROR(Common, "Could not initialize streaming ZSTD decompression");
++        return false;
++    }
++
++    std::vector<u8> input_buffer(ZSTD_DStreamInSize());
++    std::vector<u8> output_buffer(ZSTD_DStreamOutSize());
++    bool frame_complete = false;
++    while (!frame_complete) {
++        source.read(reinterpret_cast<char*>(input_buffer.data()), input_buffer.size());
++        const std::size_t bytes_read = static_cast<std::size_t>(source.gcount());
++        ZSTD_inBuffer in{input_buffer.data(), bytes_read, 0};
++        while (in.pos < in.size) {
++            ZSTD_outBuffer out{output_buffer.data(), output_buffer.size(), 0};
++            const std::size_t remaining = ZSTD_decompressStream(context.get(), &out, &in);
++            if (ZSTD_isError(remaining)) {
++                LOG_ERROR(Common, "Streaming ZSTD decompression failed: {}",
++                          ZSTD_getErrorName(remaining));
++                return false;
++            }
++            destination.write(reinterpret_cast<const char*>(output_buffer.data()), out.pos);
++            if (!destination) {
++                LOG_ERROR(Common, "Could not write streaming ZSTD output");
++                return false;
++            }
++            if (remaining == 0) {
++                frame_complete = true;
++                break;
++            }
++        }
++        if (!frame_complete && (bytes_read == 0 || source.eof())) {
++            ZSTD_outBuffer out{output_buffer.data(), output_buffer.size(), 0};
++            const std::size_t remaining = ZSTD_decompressStream(context.get(), &out, &in);
++            if (ZSTD_isError(remaining)) {
++                LOG_ERROR(Common, "Streaming ZSTD decompression failed: {}",
++                          ZSTD_getErrorName(remaining));
++                return false;
++            }
++            destination.write(reinterpret_cast<const char*>(output_buffer.data()), out.pos);
++            if (!destination || remaining != 0) {
++                LOG_ERROR(Common, "Incomplete streaming ZSTD input");
++                return false;
++            }
++            frame_complete = true;
++        }
++    }
++    return true;
++}
++
+ } // namespace Common::Compression
+ 
+ namespace FileUtil {
+diff --git a/src/common/zstd_compression.h b/src/common/zstd_compression.h
+index 68d1e1b..97b489d 100644
+--- a/src/common/zstd_compression.h
++++ b/src/common/zstd_compression.h
+@@ -8,6 +8,7 @@
+ 
+ #pragma once
+ 
++#include <iosfwd>
+ #include <span>
+ #include <unordered_map>
+ #include <vector>
+@@ -39,6 +40,8 @@ namespace Common::Compression {
+  */
+ [[nodiscard]] std::vector<u8> CompressDataZSTDDefault(std::span<const u8> source);
+ 
++bool CompressDataZSTD(std::istream& source, std::ostream& destination, u64 source_size);
++
+ /**
+  * Gets the decompressed size of the specified Zstandard compressed memory region.
+  *
+@@ -57,6 +60,8 @@ namespace Common::Compression {
+  */
+ [[nodiscard]] std::vector<u8> DecompressDataZSTD(std::span<const u8> compressed);
+ 
++bool DecompressDataZSTD(std::istream& source, std::ostream& destination);
++
+ } // namespace Common::Compression
+ 
+ namespace FileUtil {
+diff --git a/src/core/savestate.cpp b/src/core/savestate.cpp
+index 16c3db6..b9d0550 100644
+--- a/src/core/savestate.cpp
++++ b/src/core/savestate.cpp
+@@ -2,8 +2,11 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <array>
+ #include <chrono>
++#include <fstream>
+ #include <sstream>
++#include <vector>
+ #include <cryptopp/hex.h>
+ #include <fmt/ranges.h>
+ #include "common/archives.h"
+@@ -36,6 +39,30 @@ struct CSTHeader {
+ static_assert(sizeof(CSTHeader) == 256, "CSTHeader should be 256 bytes");
+ #pragma pack(pop)
+ 
++class TemporaryFile {
++public:
++    explicit TemporaryFile(std::string path) : path(std::move(path)) {}
++    ~TemporaryFile() {
++        Remove();
++    }
++
++    void Remove() {
++        if (!path.empty()) {
++            FileUtil::Delete(path);
++            path.clear();
++        }
++    }
++
++    void Commit(const std::string& destination) {
++        if (!FileUtil::Rename(path, destination)) {
++            throw std::runtime_error("Could not replace savestate " + destination);
++        }
++        path.clear();
++    }
++
++    std::string path;
++};
++
+ constexpr std::array<u8, 4> header_magic_bytes{{'C', 'S', 'T', 0x1B}};
+ 
+ static std::string GetSaveStatePath(u64 program_id, u64 movie_id, u32 slot) {
+@@ -152,24 +179,34 @@ void System::SaveState(u32 slot) const {
+         }
+     }
+ 
+-    std::ostringstream sstream{std::ios_base::binary};
+-    // Serialize
+-    oarchive oa{sstream};
+-    oa&* this;
+-
+-    const std::string& str{sstream.str()};
+-    const auto data = std::span<const u8>{reinterpret_cast<const u8*>(str.data()), str.size()};
+-    auto buffer = Common::Compression::CompressDataZSTDDefault(data);
+-
+     const u64 movie_id = movie.GetCurrentMovieID();
+     const auto path = GetSaveStatePath(title_id, movie_id, slot);
+     if (!FileUtil::CreateFullPath(path)) {
+         throw std::runtime_error("Could not create path " + path);
+     }
+ 
+-    FileUtil::IOFile file(path, "wb");
+-    if (!file) {
+-        throw std::runtime_error("Could not open file " + path);
++    TemporaryFile raw_file(path + ".tmp");
++    {
++        std::ofstream raw_stream(raw_file.path, std::ios::binary | std::ios::trunc);
++        if (!raw_stream) {
++            throw std::runtime_error("Could not open temporary savestate " + raw_file.path);
++        }
++        oarchive oa{raw_stream};
++        oa&* this;
++        raw_stream.flush();
++        if (!raw_stream) {
++            throw std::runtime_error("Could not serialize savestate " + path);
++        }
++    }
++
++    const u64 raw_size = FileUtil::GetSize(raw_file.path);
++    LOG_INFO(Core, "Serialized save state is {} bytes", raw_size);
++
++    std::ifstream raw_stream(raw_file.path, std::ios::binary);
++    TemporaryFile compressed_file(path + ".tmp-compressed");
++    std::ofstream compressed_stream(compressed_file.path, std::ios::binary | std::ios::trunc);
++    if (!raw_stream || !compressed_stream) {
++        throw std::runtime_error("Could not open temporary savestate files for " + path);
+     }
+ 
+     CSTHeader header{};
+@@ -187,10 +224,18 @@ void System::SaveState(u32 slot) const {
+     std::memcpy(header.build_name.data(), build_fullname.c_str(),
+                 std::min(build_fullname.length(), sizeof(header.build_name) - 1));
+ 
+-    if (file.WriteBytes(&header, sizeof(header)) != sizeof(header) ||
+-        file.WriteBytes(buffer.data(), buffer.size()) != buffer.size()) {
+-        throw std::runtime_error("Could not write to file " + path);
++    compressed_stream.write(reinterpret_cast<const char*>(&header), sizeof(header));
++    if (!Common::Compression::CompressDataZSTD(raw_stream, compressed_stream, raw_size)) {
++        throw std::runtime_error("Could not compress savestate " + path);
+     }
++    compressed_stream.flush();
++    if (!compressed_stream) {
++        throw std::runtime_error("Could not write to file " + compressed_file.path);
++    }
++    compressed_stream.close();
++    raw_stream.close();
++    raw_file.Remove();
++    compressed_file.Commit(path);
+ }
+ 
+ void System::LoadState(u32 slot) {
+@@ -206,40 +251,47 @@ void System::LoadState(u32 slot) {
+ 
+     const u64 movie_id = movie.GetCurrentMovieID();
+     const auto path = GetSaveStatePath(title_id, movie_id, slot);
++    if (!FileUtil::Exists(path) || FileUtil::GetSize(path) < sizeof(CSTHeader)) {
++        throw std::runtime_error("Could not read from file at " + path);
++    }
++    std::ifstream state_stream(path, std::ios::binary);
++    if (!state_stream) {
++        throw std::runtime_error("Could not read from file at " + path);
++    }
+ 
+-    std::vector<u8> decompressed;
+-    {
+-        std::vector<u8> buffer(FileUtil::GetSize(path) - sizeof(CSTHeader));
+-
+-        FileUtil::IOFile file(path, "rb");
+-
+-        // load header
+-        CSTHeader header;
+-        if (file.ReadBytes(&header, sizeof(header)) != sizeof(header)) {
+-            throw std::runtime_error("Could not read from file at " + path);
+-        }
++    CSTHeader header;
++    state_stream.read(reinterpret_cast<char*>(&header), sizeof(header));
++    if (!state_stream) {
++        throw std::runtime_error("Could not read from file at " + path);
++    }
+ 
+-        // validate header
+-        SaveStateInfo info;
+-        info.slot = slot;
+-        if (!ValidateSaveState(header, info, title_id, movie_id) ||
+-            info.status == SaveStateInfo::ValidationStatus::BuildMismatch) {
+-            throw std::runtime_error("Invalid savestate");
+-        }
++    SaveStateInfo info;
++    info.slot = slot;
++    if (!ValidateSaveState(header, info, title_id, movie_id) ||
++        info.status == SaveStateInfo::ValidationStatus::BuildMismatch) {
++        throw std::runtime_error("Invalid savestate");
++    }
+ 
+-        if (file.ReadBytes(buffer.data(), buffer.size()) != buffer.size()) {
+-            throw std::runtime_error("Could not read from file at " + path);
+-        }
+-        decompressed = Common::Compression::DecompressDataZSTD(buffer);
++    TemporaryFile raw_file(path + ".tmp");
++    std::ofstream raw_output(raw_file.path, std::ios::binary | std::ios::trunc);
++    if (!raw_output ||
++        !Common::Compression::DecompressDataZSTD(state_stream, raw_output)) {
++        throw std::runtime_error("Could not decompress savestate " + path);
+     }
+-    std::istringstream sstream{
+-        std::string{reinterpret_cast<char*>(decompressed.data()), decompressed.size()},
+-        std::ios_base::binary};
+-    decompressed.clear();
++    raw_output.flush();
++    if (!raw_output) {
++        throw std::runtime_error("Could not write temporary savestate " + raw_file.path);
++    }
++    raw_output.close();
++    state_stream.close();
+ 
+-    // Deserialize
+-    iarchive ia{sstream};
++    std::ifstream raw_stream(raw_file.path, std::ios::binary);
++    if (!raw_stream) {
++        throw std::runtime_error("Could not open temporary savestate " + raw_file.path);
++    }
++    iarchive ia{raw_stream};
+     ia&* this;
++    raw_file.Remove();
+ }
+ 
+ std::vector<u8> System::SaveStateBuffer() const {
