@@ -2,7 +2,7 @@
 
 Azahar 自带的 Qt 前端（`azahar-qt`），不经过 RetroArch。交叉编译在 x86_64 Debian/Ubuntu 上完成，不需要 root。
 
-**状态（2026-11-26）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD、可视化自定义布局编辑器和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局；实体按键手感仍待人工确认。
+**状态（2026-11-26）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD（简体中文界面）、可视化自定义布局编辑器和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局；实体按键手感仍待人工确认。
 
 ## 构建与打包
 
@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`b76e9e616be530c1db987b3e6b45cb2c591155f084f3fa1e5e092f5f2bef7bba`
+- SHA256：`c4a30fc07d6108b6fb8e23af784f2af9a2d072d1959ed0db6ba38233fc92da62`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `365a02fbf74454bbbc66cfd809eebd814425f2193b5dc0775de1b59e31c89421`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `4d2baffde0ae4724af435a55af94491340dfb45818b9ab0acac2cab69d1fa308`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -89,6 +89,7 @@ OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_Do
 改用 evdev 的原因：SDL 手柄轮询会偶发停摆（实测停过约 7 分钟），导致 Select 第一次能弹菜单、之后弹不出；而内核 evdev 始终正常投递按键。直读 evdev 让菜单按键不受 SDL 停摆影响。键码映射：Select=BTN_SELECT(314)、Start=BTN_START(315)、A=BTN_EAST(305)、B=BTN_SOUTH(304)、X=BTN_NORTH(307)、Y=BTN_WEST(308)、L1=BTN_TL(310)、R1=BTN_TR(311)、方向键=BTN_DPAD_*(544–547)，摇杆=ABS_X/ABS_Y。注意本设备物理 A/B 与标准手柄相反，与启动器 SDL 映射 `a:b1,b:b0` 一致。
 
 - 短按 Select：打开/关闭菜单。
+- 界面文案为简体中文；`run.sh` 的 fontconfig 会扫描设备 `/usr/share/fonts`，中文由 Noto Sans CJK SC 渲染（设备自带）。
 - 长按 Select 600 ms：退出游戏。
 - D-pad 或左摇杆：导航；左/右调整选项；A：确认；B：返回。
 - L1 或 X：上一页；R1 或 Y：下一页（Main、Video、Audio、System、Controls 循环）。
@@ -195,6 +196,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - OSD 可叠加在游戏画面，自动菜单操作可触发并完成读档。
 - OSD 可反复开关；方向键/摇杆切换选项时高亮跟手，游戏画面不闪。
 - 自定义布局编辑器实机验证通过：D-pad 多按逐次生效（右×3 → x=40、下×2 → y=30），L1/R1 宽度、X/Y 高度步进准确，A 切换 TOP/BOTTOM，摇杆拖动方向自然，B 保存后写入全局 `custom_*`，Start 恢复默认；每游戏覆盖保持 `layout_option=6`。
+- 中文界面逐页截图验证：主菜单、视频、音频、系统、操作说明、退出/重启确认页和布局编辑器均正常渲染，无缺字或截断。
 - L1/R1 切页已实机确认：日志中 310/311 分别对应上一页/下一页，Main、Video、Audio、System、Controls 循环正常。
 - 正式版已移除 OSD 逐键/心跳/绘制诊断日志和 2 秒 fd 重开；设备 `instant_debug_log` 恢复 false。
 - 槽位 1 保存和读档通过，内存峰值约 800 MB / 738 MB，无 OOM、无临时文件残留。

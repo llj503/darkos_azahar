@@ -26,15 +26,15 @@
 |---|---|
 | 交叉编译 | trixie chroot，aarch64 gcc 14.2 + arm64 Qt 6.8.2，成功 |
 | 产物 | `azahar-qt`，39 MB PIE，GLIBC 上限 2.38 |
-| SHA256 | `b76e9e616be530c1db987b3e6b45cb2c591155f084f3fa1e5e092f5f2bef7bba` |
+| SHA256 | `c4a30fc07d6108b6fb8e23af784f2af9a2d072d1959ed0db6ba38233fc92da62` |
 | 运行包 | `azahar-qt-bundle-2126.2.tar.zst`，59 MB（解压 153 MB），108 个库、12 个 Qt 插件 |
-| 运行包 SHA256 | `365a02fbf74454bbbc66cfd809eebd814425f2193b5dc0775de1b59e31c89421` |
+| 运行包 SHA256 | `4d2baffde0ae4724af435a55af94491340dfb45818b9ab0acac2cab69d1fa308` |
 | qemu 验证 | glibc 2.41 下 `ldd` 零缺项；三个平台插件可加载 |
 | 设备启动 | 成功进入《新超级马里奥兄弟2 黄金版 汉化版》 |
 | 显示 | AISLPC AIS 4.3 英寸 1024×768，Wayland + Weston kiosk |
 | 渲染 | OpenGL ES 3.2，ARM / Mali-G52 |
 | 声音 | ALSA PCM `RUNNING`，`Playback Path=SPK` |
-| OSD | 原生 Wayland 子表面叠在 GL 画面上；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 Main/Video/Audio/System/Controls 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
+| OSD | 原生 Wayland 子表面叠在 GL 画面上，界面为简体中文；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 主菜单/视频/音频/系统/操作说明 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
 | 自定义布局 | 编辑器可拖动/缩放 TOP/BOTTOM 双屏矩形：D-pad 或摇杆移动、L1/R1 调宽、X/Y 调高、A 切屏、Start 重置、B 保存；布局为全局一套，B 时写入 `[Layout] custom_*` 并即时应用 |
 | 槽位 1 存档 | 原始约 309 MB，压缩约 20 MB，保存约 16.9 秒，峰值约 800 MB |
 | 槽位 1 读档 | 约 12.9 秒，峰值约 738 MB，`Load completed`，无临时文件残留 |
@@ -49,7 +49,7 @@
 - `device/azahar-qt.sh` 通过 transient systemd service 停 ES、起 `/opt/vita3k/weston`，再以 `ark` 运行 Azahar。
 - `device/3ds.sh` 在 ES 的 Qt 分支复用 `azahar-dec.sh`，并把 `AZAHAR_USER_DIR` 指向 Qt 的 `share/azahar-emu`，避免解密包装把 NAND/SDMC 写到 RetroArch 目录。
 - 数据目录为 `share/azahar-emu`，配置为 `config/azahar-emu/qt-config.ini`，内部日志为 `share/azahar-emu/log/azahar_log.txt`。
-- `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
+- `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：简体中文界面、短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
 - OSD 菜单输入直读内核 evdev（按名称定位 `rk3562-joystick`，独立线程非阻塞 `read` 解析事件，原子缓存按键/摇杆按下计数，16 ms 轮询补放未处理的按下），不经过 SDL，也不消费核心输入；通过 frame limiter 暂停/恢复，不停止 `EmuThread`。游戏本身输入仍走 SDL。
 - 布局编辑器按 1024×768 基准绘制 4:3 预览和网格，蓝色 TOP / 琥珀色 BOTTOM；步长 10 px，最小 80×60，摇杆连续触发 90 ms。进入时将 `layout_option` 切到 Custom(6)，保存时 `QtConfig::SaveCustomLayoutValues()` 写全局 `custom_*`，不走每游戏覆盖。
 - OSD 使用 `WA_NativeWindow` + `WA_DontCreateNativeAncestors` 成为原生 Wayland 子表面。普通子 QWidget 在同级原生 `OpenGLRenderWidget` 存在时首次能画、之后收不到 `paintEvent`，这是“高亮不动”的真正原因；改用原生子表面后每次仅 `repaint()`，避免重建成闪烁。

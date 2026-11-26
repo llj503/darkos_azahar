@@ -12,7 +12,7 @@ index 91d8e13..0d7d07e 100644
      qt_image_interface.cpp
      qt_image_interface.h
 diff --git a/src/citra_qt/citra_qt.cpp b/src/citra_qt/citra_qt.cpp
-index f75e16f..d42291a 100644
+index f75e16f..d74d66b 100644
 --- a/src/citra_qt/citra_qt.cpp
 +++ b/src/citra_qt/citra_qt.cpp
 @@ -73,6 +73,7 @@
@@ -84,7 +84,7 @@ index f75e16f..d42291a 100644
 +        system.frame_limiter.AdvanceFrame();
 +        LOG_INFO(Frontend, "OSD save state requested for slot {}", index);
 +        if (osd_overlay) {
-+            osd_overlay->ShowMessage(QStringLiteral("Save State requested"));
++            osd_overlay->ShowMessage(QStringLiteral("正在保存状态"));
 +        }
 +    });
 +    connect(osd_overlay, &OsdOverlay::loadStateRequested, this, [this](int slot) {
@@ -97,7 +97,7 @@ index f75e16f..d42291a 100644
 +        system.frame_limiter.AdvanceFrame();
 +        LOG_INFO(Frontend, "OSD load state requested for slot {}", index);
 +        if (osd_overlay) {
-+            osd_overlay->ShowMessage(QStringLiteral("Load State requested"));
++            osd_overlay->ShowMessage(QStringLiteral("正在读取状态"));
 +        }
 +    });
 +    connect(osd_overlay, &OsdOverlay::restartRequested, this, &GMainWindow::OnRestartGame);
@@ -235,7 +235,7 @@ index b4bc976..3e2f0dd 100644
      static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs;
 diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
 new file mode 100644
-index 0000000..b3b7443
+index 0000000..7a85970
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.cpp
 @@ -0,0 +1,1446 @@
@@ -570,8 +570,8 @@ index 0000000..b3b7443
 +    m_per_game_active = active;
 +    BuildPages();
 +    m_selected = std::clamp(m_selected, 0, static_cast<int>(m_pages[m_current_page].rows.size()) - 1);
-+    ShowMessage(active ? QStringLiteral("Per-game override enabled")
-+                       : QStringLiteral("Per-game override removed"));
++    ShowMessage(active ? QStringLiteral("已启用本游戏独立设置")
++                       : QStringLiteral("已删除本游戏独立设置"));
 +    repaint();
 +}
 +
@@ -602,66 +602,66 @@ index 0000000..b3b7443
 +    m_pages.clear();
 +    m_pages.resize(7);
 +    m_pages[kMainPage].title = QStringLiteral("Azahar Nano");
-+    m_pages[kVideoPage].title = QStringLiteral("Video");
-+    m_pages[kAudioPage].title = QStringLiteral("Audio");
-+    m_pages[kSystemPage].title = QStringLiteral("System");
-+    m_pages[kControlsPage].title = QStringLiteral("Controls");
-+    m_pages[kExitConfirmPage].title = QStringLiteral("Exit Game");
-+    m_pages[kRestartConfirmPage].title = QStringLiteral("Restart Game");
++    m_pages[kVideoPage].title = QStringLiteral("视频");
++    m_pages[kAudioPage].title = QStringLiteral("音频");
++    m_pages[kSystemPage].title = QStringLiteral("系统");
++    m_pages[kControlsPage].title = QStringLiteral("操作说明");
++    m_pages[kExitConfirmPage].title = QStringLiteral("退出游戏");
++    m_pages[kRestartConfirmPage].title = QStringLiteral("重新开始");
 +
 +    Page& main = m_pages[kMainPage];
-+    AddAction(main, QStringLiteral("Resume"), QStringLiteral("Return to the game"), [this] {
++    AddAction(main, QStringLiteral("继续游戏"), QStringLiteral("返回游戏"), [this] {
 +        RequestResume(Button::A);
 +    });
-+    AddAction(main, QStringLiteral("Save State"), QStringLiteral("Save to the selected slot"),
++    AddAction(main, QStringLiteral("保存状态"), QStringLiteral("保存到当前槽位"),
 +              [this] { emit saveStateRequested(m_slot); });
-+    AddAction(main, QStringLiteral("Load State"), QStringLiteral("Load the selected slot"),
++    AddAction(main, QStringLiteral("读取状态"), QStringLiteral("读取当前槽位"),
 +              [this] { emit loadStateRequested(m_slot); });
-+    AddChoice(main, QStringLiteral("State Slot"), QStringLiteral("Savestate slot"),
++    AddChoice(main, QStringLiteral("存档槽位"), QStringLiteral("即时存档槽位"),
 +              QStringList{QStringLiteral("1"), QStringLiteral("2"), QStringLiteral("3"),
 +                          QStringLiteral("4"), QStringLiteral("5"), QStringLiteral("6"),
 +                          QStringLiteral("7"), QStringLiteral("8"), QStringLiteral("9"),
 +                          QStringLiteral("10")},
 +              m_slot - 1, [this](int index) { m_slot = index + 1; });
-+    AddPageRow(main, QStringLiteral("Video"),
-+               QStringLiteral("Resolution, layout, frame rate and shaders"), kVideoPage);
-+    AddPageRow(main, QStringLiteral("Audio"), QStringLiteral("Volume and audio timing"), kAudioPage);
-+    AddPageRow(main, QStringLiteral("System"), QStringLiteral("Console mode, region and CPU clock"),
++    AddPageRow(main, QStringLiteral("视频"),
++               QStringLiteral("分辨率、布局、帧率与着色器"), kVideoPage);
++    AddPageRow(main, QStringLiteral("音频"), QStringLiteral("音量与音频时序"), kAudioPage);
++    AddPageRow(main, QStringLiteral("系统"), QStringLiteral("主机模式、区域与 CPU 时钟"),
 +               kSystemPage);
-+    AddPageRow(main, QStringLiteral("Controls"), QStringLiteral("Controller button reference"),
++    AddPageRow(main, QStringLiteral("操作说明"), QStringLiteral("手柄按键说明"),
 +               kControlsPage);
 +    AddAction(main,
-+              m_per_game_active ? QStringLiteral("Delete Per-Game Override")
-+                                : QStringLiteral("Create Per-Game Override"),
-+              m_per_game_active ? QStringLiteral("Remove this game's separate settings")
-+                                : QStringLiteral("Keep changes separate for this game"),
++              m_per_game_active ? QStringLiteral("删除本游戏独立设置")
++                                : QStringLiteral("创建本游戏独立设置"),
++              m_per_game_active ? QStringLiteral("移除本游戏的独立设置")
++                                : QStringLiteral("仅对本游戏保存独立设置"),
 +              [this] { emit overrideToggleRequested(); });
-+    AddPageRow(main, QStringLiteral("Restart Game"), QStringLiteral("Start this game again"),
++    AddPageRow(main, QStringLiteral("重新开始游戏"), QStringLiteral("重新启动本游戏"),
 +               kRestartConfirmPage);
-+    AddPageRow(main, QStringLiteral("Exit Game"), QStringLiteral("Return to the game list"),
++    AddPageRow(main, QStringLiteral("退出游戏"), QStringLiteral("返回游戏列表"),
 +               kExitConfirmPage);
 +
 +    Page& video = m_pages[kVideoPage];
-+    AddChoice(video, QStringLiteral("Resolution"), QStringLiteral("Internal rendering resolution"),
++    AddChoice(video, QStringLiteral("分辨率"), QStringLiteral("内部渲染分辨率"),
 +              Settings::values.resolution_factor,
-+              {{QStringLiteral("Native"), 1u},
++              {{QStringLiteral("原生"), 1u},
 +               {QStringLiteral("2x"), 2u},
 +               {QStringLiteral("3x"), 3u},
 +               {QStringLiteral("4x"), 4u}});
-+    AddChoice(video, QStringLiteral("Screen Layout"), QStringLiteral("Arrangement of both screens"),
++    AddChoice(video, QStringLiteral("屏幕布局"), QStringLiteral("双屏排列方式"),
 +              Settings::values.layout_option,
-+              {{QStringLiteral("Default"), Settings::LayoutOption::Default},
-+               {QStringLiteral("Single Screen"), Settings::LayoutOption::SingleScreen},
-+               {QStringLiteral("Large Screen"), Settings::LayoutOption::LargeScreen},
-+               {QStringLiteral("Side Screen"), Settings::LayoutOption::SideScreen},
-+               {QStringLiteral("Hybrid Screen"), Settings::LayoutOption::HybridScreen},
-+               {QStringLiteral("Custom Layout"), Settings::LayoutOption::CustomLayout}});
-+    AddAction(video, QStringLiteral("Custom Layout Editor"),
-+              QStringLiteral("Move and resize the top and bottom screens"),
++              {{QStringLiteral("默认"), Settings::LayoutOption::Default},
++               {QStringLiteral("单屏"), Settings::LayoutOption::SingleScreen},
++               {QStringLiteral("大屏"), Settings::LayoutOption::LargeScreen},
++               {QStringLiteral("横排"), Settings::LayoutOption::SideScreen},
++               {QStringLiteral("混合"), Settings::LayoutOption::HybridScreen},
++               {QStringLiteral("自定义"), Settings::LayoutOption::CustomLayout}});
++    AddAction(video, QStringLiteral("自定义布局编辑器"),
++              QStringLiteral("拖动、缩放上下屏"),
 +              [this] { OpenLayoutEditor(); });
-+    AddToggle(video, QStringLiteral("Swap Screens"), QStringLiteral("Swap the upper and lower screens"),
++    AddToggle(video, QStringLiteral("交换屏幕"), QStringLiteral("交换上下屏"),
 +              Settings::values.swap_screen);
-+    AddChoice(video, QStringLiteral("Frame Limit"), QStringLiteral("Maximum emulation frame rate"),
++    AddChoice(video, QStringLiteral("帧率上限"), QStringLiteral("模拟帧率上限"),
 +              Settings::values.frame_limit,
 +              {{QStringLiteral("30 FPS"), 30.0},
 +               {QStringLiteral("60 FPS"), 60.0},
@@ -669,8 +669,8 @@ index 0000000..b3b7443
 +               {QStringLiteral("120 FPS"), 120.0},
 +               {QStringLiteral("144 FPS"), 144.0},
 +               {QStringLiteral("200 FPS"), 200.0}});
-+    AddToggle(video, QStringLiteral("Shader Cache"),
-+              QStringLiteral("Cache compiled shaders on disk for faster startup"),
++    AddToggle(video, QStringLiteral("着色器缓存"),
++              QStringLiteral("缓存已编译着色器以加快启动"),
 +              Settings::values.use_disk_shader_cache);
 +
 +    Page& audio = m_pages[kAudioPage];
@@ -678,19 +678,19 @@ index 0000000..b3b7443
 +    for (int percent = 0; percent <= 100; percent += 10) {
 +        volume_choices.emplace_back(QStringLiteral("%1%").arg(percent), percent / 100.0f);
 +    }
-+    AddChoice(audio, QStringLiteral("Volume"), QStringLiteral("Game audio volume"),
++    AddChoice(audio, QStringLiteral("音量"), QStringLiteral("游戏音量"),
 +              Settings::values.volume, volume_choices);
-+    AddToggle(audio, QStringLiteral("Audio Stretching"),
-+              QStringLiteral("Stretch audio to match emulation speed"),
++    AddToggle(audio, QStringLiteral("音频拉伸"),
++              QStringLiteral("按模拟速度调整音频"),
 +              Settings::values.enable_audio_stretching);
-+    AddToggle(audio, QStringLiteral("Realtime Audio"),
-+              QStringLiteral("Scale audio using real elapsed time"),
++    AddToggle(audio, QStringLiteral("实时音频"),
++              QStringLiteral("按真实时间调整音频"),
 +              Settings::values.enable_realtime_audio);
 +
 +    Page& system = m_pages[kSystemPage];
-+    AddToggle(system, QStringLiteral("New 3DS Mode"),
-+              QStringLiteral("Use New 3DS CPU and memory limits"), Settings::values.is_new_3ds);
-+    AddChoice(system, QStringLiteral("CPU Clock"), QStringLiteral("Emulated CPU clock percentage"),
++    AddToggle(system, QStringLiteral("New 3DS 模式"),
++              QStringLiteral("使用 New 3DS 的 CPU 与内存规格"), Settings::values.is_new_3ds);
++    AddChoice(system, QStringLiteral("CPU 时钟"), QStringLiteral("模拟 CPU 频率百分比"),
 +              Settings::values.cpu_clock_percentage,
 +              {{QStringLiteral("50%"), 50},
 +               {QStringLiteral("75%"), 75},
@@ -699,47 +699,47 @@ index 0000000..b3b7443
 +               {QStringLiteral("200%"), 200},
 +               {QStringLiteral("300%"), 300},
 +               {QStringLiteral("400%"), 400}});
-+    AddChoice(system, QStringLiteral("Region"), QStringLiteral("Console region"),
++    AddChoice(system, QStringLiteral("区域"), QStringLiteral("主机区域"),
 +              Settings::values.region_value,
-+              {{QStringLiteral("Auto"), Settings::REGION_VALUE_AUTO_SELECT},
-+               {QStringLiteral("Japan"), 0},
-+               {QStringLiteral("USA"), 1},
-+               {QStringLiteral("Europe"), 2},
-+               {QStringLiteral("Australia"), 3},
-+               {QStringLiteral("China"), 4},
-+               {QStringLiteral("Korea"), 5}});
-+    AddInfo(system, QStringLiteral("Some system settings apply on the next game launch."));
++              {{QStringLiteral("自动"), Settings::REGION_VALUE_AUTO_SELECT},
++               {QStringLiteral("日本"), 0},
++               {QStringLiteral("美国"), 1},
++               {QStringLiteral("欧洲"), 2},
++               {QStringLiteral("澳大利亚"), 3},
++               {QStringLiteral("中国"), 4},
++               {QStringLiteral("韩国"), 5}});
++    AddInfo(system, QStringLiteral("部分系统设置将在下次启动游戏时生效。"));
 +
 +    Page& controls = m_pages[kControlsPage];
-+    AddInfo(controls, QStringLiteral("Navigate: D-pad or left stick"));
-+    AddInfo(controls, QStringLiteral("Select / activate: A"));
-+    AddInfo(controls, QStringLiteral("Back / resume: B"));
-+    AddInfo(controls, QStringLiteral("Adjust value: Left / Right"));
-+    AddInfo(controls, QStringLiteral("Change tab: X / Y"));
-+    AddInfo(controls, QStringLiteral("Open menu: short Select"));
-+    AddInfo(controls, QStringLiteral("Close menu: short Select"));
-+    AddInfo(controls, QStringLiteral("Exit game: hold Select"));
++    AddInfo(controls, QStringLiteral("导航：方向键 / 左摇杆"));
++    AddInfo(controls, QStringLiteral("确认 / 激活：A"));
++    AddInfo(controls, QStringLiteral("返回 / 恢复：B"));
++    AddInfo(controls, QStringLiteral("调整数值：左 / 右"));
++    AddInfo(controls, QStringLiteral("切换页签：X / Y"));
++    AddInfo(controls, QStringLiteral("打开菜单：短按 Select"));
++    AddInfo(controls, QStringLiteral("关闭菜单：短按 Select"));
++    AddInfo(controls, QStringLiteral("退出游戏：长按 Select"));
 +
 +    Page& exit_confirm = m_pages[kExitConfirmPage];
-+    AddInfo(exit_confirm, QStringLiteral("Unsaved progress will be lost."));
-+    AddAction(exit_confirm, QStringLiteral("Yes, Exit Game"), QStringLiteral("Return to the game list"),
++    AddInfo(exit_confirm, QStringLiteral("未保存的进度将丢失。"));
++    AddAction(exit_confirm, QStringLiteral("确认退出"), QStringLiteral("返回游戏列表"),
 +              [this] {
 +                  hide();
 +                  m_open = false;
 +                  emit exitRequested();
 +              });
-+    AddAction(exit_confirm, QStringLiteral("Cancel"), QStringLiteral("Return to the menu"),
++    AddAction(exit_confirm, QStringLiteral("取消"), QStringLiteral("返回菜单"),
 +              [this] { GoBack(); });
 +
 +    Page& restart_confirm = m_pages[kRestartConfirmPage];
-+    AddInfo(restart_confirm, QStringLiteral("The game will start again from its title screen."));
-+    AddAction(restart_confirm, QStringLiteral("Yes, Restart Game"), QStringLiteral("Restart now"),
++    AddInfo(restart_confirm, QStringLiteral("游戏将从标题画面重新开始。"));
++    AddAction(restart_confirm, QStringLiteral("确认重启"), QStringLiteral("立即重启"),
 +              [this] {
 +                  hide();
 +                  m_open = false;
 +                  emit restartRequested();
 +              });
-+    AddAction(restart_confirm, QStringLiteral("Cancel"), QStringLiteral("Return to the menu"),
++    AddAction(restart_confirm, QStringLiteral("取消"), QStringLiteral("返回菜单"),
 +              [this] { GoBack(); });
 +
 +    m_current_page = std::clamp(m_current_page, 0, static_cast<int>(m_pages.size()) - 1);
@@ -813,7 +813,7 @@ index 0000000..b3b7443
 +        }
 +        Assign(setting, values[index]);
 +        emit settingsChanged();
-+        ShowMessage(QStringLiteral("Setting saved"));
++        ShowMessage(QStringLiteral("设置已保存"));
 +    });
 +}
 +
@@ -821,7 +821,7 @@ index 0000000..b3b7443
 +void OsdOverlay::AddToggle(Page& page, const QString& label, const QString& hint,
 +                           Settings::SwitchableSetting<Type, ranged>& setting) {
 +    AddChoice(page, label, hint, setting,
-+              {{QStringLiteral("Off"), Type{0}}, {QStringLiteral("On"), Type{1}}});
++              {{QStringLiteral("关闭"), Type{0}}, {QStringLiteral("开启"), Type{1}}});
 +}
 +
 +template <typename Type, bool ranged>
@@ -1049,7 +1049,7 @@ index 0000000..b3b7443
 +    }
 +    m_resume_pending = true;
 +    m_resume_button = button;
-+    ShowMessage(QStringLiteral("Release buttons to resume"));
++    ShowMessage(QStringLiteral("松开按键以继续"));
 +    repaint();
 +}
 +
@@ -1224,7 +1224,7 @@ index 0000000..b3b7443
 +    Assign(Settings::values.layout_option, Settings::LayoutOption::CustomLayout);
 +    BuildPages();
 +    emit settingsChanged();
-+    ShowMessage(QStringLiteral("Editing TOP screen"));
++    ShowMessage(QStringLiteral("正在编辑上屏"));
 +}
 +
 +void OsdOverlay::CloseLayoutEditor() {
@@ -1237,7 +1237,7 @@ index 0000000..b3b7443
 +    const int row_count = static_cast<int>(m_pages[kVideoPage].rows.size());
 +    m_selected = std::clamp(m_layout_return_selection, 0, std::max(0, row_count - 1));
 +    m_scroll = 0;
-+    ShowMessage(QStringLiteral("Layout saved"));
++    ShowMessage(QStringLiteral("布局已保存"));
 +}
 +
 +void OsdOverlay::NudgeLayout(int dx, int dy) {
@@ -1269,7 +1269,7 @@ index 0000000..b3b7443
 +    s.custom_bottom_width = 640;
 +    s.custom_bottom_height = 480;
 +    ApplyLayoutChange(false);
-+    ShowMessage(QStringLiteral("Layout reset to defaults"));
++    ShowMessage(QStringLiteral("布局已恢复默认"));
 +}
 +
 +void OsdOverlay::HandleLayoutInput(Button button, bool rising, bool repeat) {
@@ -1317,8 +1317,8 @@ index 0000000..b3b7443
 +    case Button::A:
 +        if (rising) {
 +            m_layout_top = !m_layout_top;
-+            ShowMessage(QStringLiteral("Editing %1 screen")
-+                            .arg(m_layout_top ? QStringLiteral("TOP") : QStringLiteral("BOTTOM")));
++            ShowMessage(QStringLiteral("正在编辑%1")
++                            .arg(m_layout_top ? QStringLiteral("上屏") : QStringLiteral("下屏")));
 +        }
 +        break;
 +    case Button::B:
@@ -1374,7 +1374,7 @@ index 0000000..b3b7443
 +    title_font.setBold(true);
 +    painter.setFont(title_font);
 +    painter.setPen(QColor(245, 248, 252));
-+    painter.drawText(margin, static_cast<int>(42 * scale), QStringLiteral("Custom Layout"));
++    painter.drawText(margin, static_cast<int>(42 * scale), QStringLiteral("自定义布局"));
 +
 +    ReadBattery();
 +    QFont small_font = QApplication::font();
@@ -1389,8 +1389,8 @@ index 0000000..b3b7443
 +                     static_cast<int>(42 * scale), status);
 +
 +    const QString edit_text =
-+        QStringLiteral("Editing %1 screen")
-+            .arg(m_layout_top ? QStringLiteral("TOP") : QStringLiteral("BOTTOM"));
++        QStringLiteral("正在编辑%1")
++            .arg(m_layout_top ? QStringLiteral("上屏") : QStringLiteral("下屏"));
 +    painter.setPen(active_color);
 +    painter.drawText(margin, static_cast<int>(68 * scale), edit_text);
 +    painter.setPen(QColor(151, 165, 184));
@@ -1466,7 +1466,7 @@ index 0000000..b3b7443
 +        painter.setFont(label_font);
 +        painter.setPen(QColor(255, 255, 255, active ? 255 : 210));
 +        painter.drawText(rr.adjusted(6, 4, -6, -4), Qt::AlignLeft | Qt::AlignTop,
-+                         is_top ? QStringLiteral("TOP") : QStringLiteral("BOTTOM"));
++                         is_top ? QStringLiteral("上屏") : QStringLiteral("下屏"));
 +        if (rr.height() >= static_cast<int>(58 * scale)) {
 +            QFont size_font = small_font;
 +            size_font.setPixelSize(static_cast<int>(13 * scale));
@@ -1498,10 +1498,10 @@ index 0000000..b3b7443
 +        painter.setFont(font);
 +        painter.setPen(active ? base : QColor(150, 164, 182));
 +        painter.drawText(margin + static_cast<int>(18 * scale), y,
-+                         is_top ? QStringLiteral("TOP") : QStringLiteral("BOTTOM"));
++                         is_top ? QStringLiteral("上屏") : QStringLiteral("下屏"));
 +        painter.setPen(active ? QColor(240, 246, 252) : QColor(168, 181, 197));
 +        painter.drawText(margin + static_cast<int>(92 * scale), y,
-+                         QStringLiteral("X %1    Y %2    W %3    H %4")
++                         QStringLiteral("X %1    Y %2    宽 %3    高 %4")
 +                             .arg(r.x)
 +                             .arg(r.y)
 +                             .arg(r.w)
@@ -1512,20 +1512,20 @@ index 0000000..b3b7443
 +    draw_readout(false, info_y + static_cast<int>(26 * scale));
 +    painter.setFont(small_font);
 +    painter.setPen(QColor(132, 148, 167));
-+    const QString canvas_text = QStringLiteral("Canvas %1 x %2").arg(canvas_w).arg(canvas_h);
++    const QString canvas_text = QStringLiteral("画布 %1 x %2").arg(canvas_w).arg(canvas_h);
 +    painter.drawText(width() - margin - painter.fontMetrics().horizontalAdvance(canvas_text), info_y,
 +                     canvas_text);
 +    if (Settings::values.swap_screen.GetValue()) {
-+        const QString swap_text = QStringLiteral("Swap Screens is ON");
++        const QString swap_text = QStringLiteral("已开启交换屏幕");
 +        painter.setPen(bottom_color);
 +        painter.drawText(width() - margin - painter.fontMetrics().horizontalAdvance(swap_text),
 +                         info_y + static_cast<int>(26 * scale), swap_text);
 +    }
 +
 +    const QString hint_move = QStringLiteral(
-+        "D-pad / Stick: Move    L1 / R1: Width    X / Y: Height    A: Switch screen");
++        "方向键 / 摇杆：移动    L1 / R1：宽度    X / Y：高度    A：切换屏幕");
 +    const QString hint_actions =
-+        QStringLiteral("B: Back    Start: Reset    Select: Close    Hold Select: Exit");
++        QStringLiteral("B：保存退出    Start：重置    Select：保存并继续    长按 Select：退出");
 +    painter.setPen(QColor(145, 159, 178));
 +    painter.drawText(margin, footer_top + static_cast<int>(78 * scale),
 +                     painter.fontMetrics().elidedText(hint_move, Qt::ElideRight, width() - margin * 2));
@@ -1580,8 +1580,8 @@ index 0000000..b3b7443
 +                         painter.fontMetrics().horizontalAdvance(status),
 +                     panel.top() + static_cast<int>(43 * scale), status);
 +
-+    const QStringList tabs{QStringLiteral("Main"), QStringLiteral("Video"), QStringLiteral("Audio"),
-+                           QStringLiteral("System"), QStringLiteral("Controls")};
++    const QStringList tabs{QStringLiteral("主菜单"), QStringLiteral("视频"), QStringLiteral("音频"),
++                           QStringLiteral("系统"), QStringLiteral("操作说明")};
 +    const int tabs_left = panel.left() + static_cast<int>(24 * scale);
 +    const int tabs_top = panel.top() + static_cast<int>(80 * scale);
 +    const int tab_width = (panel.width() - static_cast<int>(48 * scale)) / tabs.size();
@@ -1670,8 +1670,8 @@ index 0000000..b3b7443
 +    painter.drawText(footer.left(), panel.bottom() - static_cast<int>(53 * scale), hint_text);
 +    painter.setPen(QColor(145, 159, 178));
 +    const QString controls = QStringLiteral(
-+        "D-pad / Stick: Navigate    L1 / R1: Page    Left / Right: Adjust    A: Select    B: "
-+        "Back    Select: Menu");
++        "方向键 / 摇杆：导航    L1 / R1：翻页    左 / 右：调整    A：确认    B：返回    "
++        "Select：菜单");
 +    painter.drawText(footer.left(), panel.bottom() - static_cast<int>(29 * scale),
 +                     painter.fontMetrics().elidedText(controls, Qt::ElideRight, footer.width()));
 +}
