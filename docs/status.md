@@ -26,9 +26,9 @@
 |---|---|
 | 交叉编译 | trixie chroot，aarch64 gcc 14.2 + arm64 Qt 6.8.2，成功 |
 | 产物 | `azahar-qt`，39 MB PIE，GLIBC 上限 2.38 |
-| SHA256 | `64a160498ccf3361250752721ad752116728c66cc691ac713f60de8292225568` |
+| SHA256 | `51987065d4e1bfa4e55ac219f1d6e2508f984a4dd370f01fe6a3349346849cdd` |
 | 运行包 | `azahar-qt-bundle-2126.2.tar.zst`，59 MB（解压 153 MB），108 个库、12 个 Qt 插件 |
-| 运行包 SHA256 | `1f58c7e5df5c884af5f98ca547f4d964a888066662e409ead0bbcff6a694e597` |
+| 运行包 SHA256 | `2d6c96589318c6a540cb3a742b44cd8d717e3c3fbb5368679999aa0f720c3b65` |
 | qemu 验证 | glibc 2.41 下 `ldd` 零缺项；三个平台插件可加载 |
 | 设备启动 | 成功进入《新超级马里奥兄弟2 黄金版 汉化版》 |
 | 显示 | AISLPC AIS 4.3 英寸 1024×768，Wayland + Weston kiosk |
@@ -36,6 +36,7 @@
 | 声音 | ALSA PCM `RUNNING`，`Playback Path=SPK` |
 | OSD | 原生 Wayland 子表面叠在 GL 画面上，界面为简体中文；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 主菜单/视频/音频/系统/操作说明 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
 | 自定义布局 | 编辑器可拖动/缩放 TOP/BOTTOM 双屏矩形：D-pad 或摇杆移动、L1/R1 调宽、X/Y 调高、A 切屏、Start 重置、B 保存；布局为全局一套，B 时写入 `[Layout] custom_*` 并即时应用；画布超出 1024×768 时自动等比缩放居中，双屏完整显示 |
+| 自定义背景 | Video 页「背景图片」从 `share/azahar-emu/backgrounds/` 发现 png/jpg/jpeg/webp/bmp，即时生效并持久化到 `config/azahar-emu/osd.ini`；OpenGL 渲染器在双屏之下绘制全屏背景并等比裁剪，实机帧缓冲回读四角像素与测试图一致 |
 | 槽位 1 存档 | 原始约 309 MB，压缩约 20 MB，保存约 16.9 秒，峰值约 800 MB |
 | 槽位 1 读档 | 约 12.9 秒，峰值约 738 MB，`Load completed`，无临时文件残留 |
 | 手柄 GUID | `1900a4dd726b333536322d6a6f797300`，SDL 确认 `controller=true` |
@@ -52,6 +53,7 @@
 - `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：简体中文界面、短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
 - OSD 菜单输入直读内核 evdev（按名称定位 `rk3562-joystick`，独立线程非阻塞 `read` 解析事件，原子缓存按键/摇杆按下计数，16 ms 轮询补放未处理的按下），不经过 SDL，也不消费核心输入；通过 frame limiter 暂停/恢复，不停止 `EmuThread`。游戏本身输入仍走 SDL。
 - 布局编辑器按 4:3 预览和网格绘制，蓝色 TOP / 琥珀色 BOTTOM；步长 10 px，最小 80×60，上限 2048，摇杆连续触发 90 ms。自定义坐标构成虚拟画布，`Layout::CustomFrameLayout` 按窗口等比缩放并居中（截图/录像路径传画布尺寸，保持 1:1），编辑器同步显示「缩放 N%」。进入时将 `layout_option` 切到 Custom(6)，保存时 `QtConfig::SaveCustomLayoutValues()` 写全局 `custom_*`，不走每游戏覆盖。
+- 自定义背景由 Qt 前端用 `QImage` 解码（RGBX8888，超过 2048 先缩放），经 `RendererBase::SetBackgroundImage` 线程安全地交给 OpenGL 渲染器；`RendererOpenGL::DrawBackground` 在 `DrawScreens` 清屏后、双屏之前上传纹理并绘制全屏四边形，等比裁剪填满窗口。核心没有图像解码器，因此解码放在前端；Vulkan 后端暂不实现。选择结果写入独立的 `config/azahar-emu/osd.ini`，不参与核心设置，也不随每游戏覆盖保存。
 - OSD 使用 `WA_NativeWindow` + `WA_DontCreateNativeAncestors` 成为原生 Wayland 子表面。普通子 QWidget 在同级原生 `OpenGLRenderWidget` 存在时首次能画、之后收不到 `paintEvent`，这是“高亮不动”的真正原因；改用原生子表面后每次仅 `repaint()`，避免重建成闪烁。
 - 翻页：L1 / X 上一页，R1 / Y 下一页（Main、Video、Audio、System、Controls 循环）。
 - 每游戏设置为 `config/azahar-emu/custom/<TitleID>.ini`；启用时不写全局配置。
@@ -91,3 +93,4 @@
 - **绘制卡顿仍会丢键**：主线程 QPainter 绘制期间到达的按键，若只靠瞬时状态轮询会被漏掉（同一按键按两次只触发一次）。改为在读取线程累计按下次数（EV_KEY value=1），16 ms 轮询时补放未处理的次数（上限 8），连按逐次生效。
 - **重置布局后仍需确认保存**：Start 只恢复默认矩形，不会自动落盘；需再按 B 保存，否则退出后仍是旧布局。
 - **自定义布局超出屏幕被裁切**：`custom_*` 原先按窗口像素 1:1 摆放，画布 1710×1270 在 1024×768 上只有左上角可见。改为 `Layout::CustomFrameLayout` 把整块画布等比缩放并居中铺进窗口，编辑器显示实际缩放百分比；截图/录像仍按画布原尺寸输出。
+- **背景图片验证读到全零像素**：在 `RenderToMailbox` 里用 `glReadPixels` 回读时只绑定了 draw framebuffer，读到的是默认帧缓冲。临时把 `state.draw.read_framebuffer` 指向 mailbox 纹理后，四角像素与测试图一致；该诊断代码已移除。

@@ -2,7 +2,7 @@
 
 Azahar 自带的 Qt 前端（`azahar-qt`），不经过 RetroArch。交叉编译在 x86_64 Debian/Ubuntu 上完成，不需要 root。
 
-**状态（2026-11-26）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD（简体中文界面）、可视化自定义布局编辑器和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局，画布超出窗口时由渲染器等比缩放居中、不会裁切；实体按键手感仍待人工确认。
+**状态（2026-11-26）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD（简体中文界面）、可视化自定义布局编辑器、自定义背景图片和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局，画布超出窗口时由渲染器等比缩放居中、不会裁切；实体按键手感仍待人工确认。
 
 ## 构建与打包
 
@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`64a160498ccf3361250752721ad752116728c66cc691ac713f60de8292225568`
+- SHA256：`51987065d4e1bfa4e55ac219f1d6e2508f984a4dd370f01fe6a3349346849cdd`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `1f58c7e5df5c884af5f98ca547f4d964a888066662e409ead0bbcff6a694e597`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `2d6c96589318c6a540cb3a742b44cd8d717e3c3fbb5368679999aa0f720c3b65`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -94,7 +94,7 @@ OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_Do
 - D-pad 或左摇杆：导航；左/右调整选项；A：确认；B：返回。
 - L1 或 X：上一页；R1 或 Y：下一页（Main、Video、Audio、System、Controls 循环）。
 - 主菜单：Resume、Save/Load State、State Slot 1–10、Video、Audio、System、Controls、每游戏覆盖、Restart、Exit。
-- Video：内部Resolution、Screen Layout、Custom Layout Editor、Swap Screens、Frame Limit、Shader Cache。
+- Video：内部Resolution、Screen Layout、Custom Layout Editor、背景图片、Swap Screens、Frame Limit、Shader Cache。
 - Audio：Volume、Audio Stretching、Realtime Audio。
 - System：New 3DS Mode、CPU Clock、Region。
 - 存档界面槽位 1–10 对应核心普通槽位 0–9；核心槽位 0 保留给 Quick Save。
@@ -112,6 +112,15 @@ Screen Layout 选择 `Custom` 或进入 Video 页的 Custom Layout Editor 时，
 - Select：保存并恢复游戏（长按仍为退出游戏）。
 
 矩形坐标构成一块虚拟画布（最小 80×60、坐标非负、宽高上限 2048），渲染时 `Layout::CustomFrameLayout` 会把整块画布等比缩放并居中铺进 1024×768 窗口，所以画布超出屏幕也不会被裁切；编辑器右下角显示「画布 W x H  缩放 N%」，与实机画面一致。进入编辑器时会把当前 `layout_option` 切到 Custom（值 6，按每游戏覆盖规则写入），因此编辑器里拖动即时生效；B 保存时调用 `QtConfig::SaveCustomLayoutValues()` 写全局 `custom_*`。
+
+### 自定义背景图片
+
+Video 页「背景图片」可选一张图片填满布局黑边（例如双屏外的区域），选「关闭」恢复纯色清屏。图片放在数据目录的 `backgrounds/` 子目录（例如 `/roms/3ds/azahar/share/azahar-emu/backgrounds/`），支持 `png`、`jpg`、`jpeg`、`webp`、`bmp`，按文件名排序；该目录在 OSD 首次列出时自动创建。改动即时生效，无需重启游戏。
+
+- 背景是全局设置，写在独立的 `config/azahar-emu/osd.ini` 的 `background/image`，不参与核心设置和每游戏覆盖。
+- Qt 前端用 `QImage` 解码并转为 RGBX8888（透明像素按黑底合成，超过 2048 像素先等比缩小），再通过 `RendererBase::SetBackgroundImage` 交给渲染线程。
+- `RendererOpenGL::DrawBackground` 在清屏之后、双屏之前绘制全屏四边形，按窗口宽高比居中裁剪（cover），因此 4:3、16:9 等图片都不会拉伸。
+- 只有 OpenGL 后端实现；Vulkan 路径忽略该设置。
 
 已通过自动菜单操作验证：OSD 打开、Load State 请求、核心读档、OSD 恢复，以及 Exit 确认后结束独立会话并恢复 ES。Restart/Exit 确认页默认选中第一个可执行项，避免按 A 落在说明行上。自定义布局编辑器已用虚拟手柄逐项验证：D-pad 连续移动、L1/R1 调宽、X/Y 调高、A 切换上下屏、摇杆拖动、B 保存、Start 重置均准确；保存后全局 `custom_*` 与每游戏 `layout_option=6` 均落盘。其余设置保存、每游戏覆盖删除/重建和 Restart 还需要进一步实机操作验证。
 
@@ -197,6 +206,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - OSD 可反复开关；方向键/摇杆切换选项时高亮跟手，游戏画面不闪。
 - 自定义布局编辑器实机验证通过：D-pad 多按逐次生效（右×3 → x=40、下×2 → y=30），L1/R1 宽度、X/Y 高度步进准确，A 切换 TOP/BOTTOM，摇杆拖动方向自然，B 保存后写入全局 `custom_*`，Start 恢复默认；每游戏覆盖保持 `layout_option=6`。
 - 布局自适应验证：全局 `custom_*` 为 1710×1270 画布时，1024×768 下按 60% 缩放居中，运行日志实测布局矩形 top `(6,4–641,477)`、bottom `(641,477–1024,764)`，全部位于窗口内，无裁切。
+- 自定义背景实机验证：1600×1200 测试图通过 OSD 选择后写入 `osd.ini`，启动日志出现 `OSD background image set`；帧缓冲回读 1024×768 左下角 `(122,61,30)`、右上角 `(27,42,74)`，与测试图对应角落颜色一致，证明背景已绘制、方向正确且在双屏之下。
 - 中文界面逐页截图验证：主菜单、视频、音频、系统、操作说明、退出/重启确认页和布局编辑器均正常渲染，无缺字或截断。
 - L1/R1 切页已实机确认：日志中 310/311 分别对应上一页/下一页，Main、Video、Audio、System、Controls 循环正常。
 - 正式版已移除 OSD 逐键/心跳/绘制诊断日志和 2 秒 fd 重开；设备 `instant_debug_log` 恢复 false。

@@ -12,7 +12,7 @@ index 91d8e13..0d7d07e 100644
      qt_image_interface.cpp
      qt_image_interface.h
 diff --git a/src/citra_qt/citra_qt.cpp b/src/citra_qt/citra_qt.cpp
-index f75e16f..d74d66b 100644
+index f75e16f..103fa4f 100644
 --- a/src/citra_qt/citra_qt.cpp
 +++ b/src/citra_qt/citra_qt.cpp
 @@ -73,6 +73,7 @@
@@ -66,7 +66,7 @@ index f75e16f..d74d66b 100644
  
      if (!LoadROM(filename)) {
          render_window->ReleaseRenderTarget();
-@@ -1623,6 +1635,80 @@ void GMainWindow::BootGame(const QString& filename) {
+@@ -1623,6 +1635,104 @@ void GMainWindow::BootGame(const QString& filename) {
          ShowFullscreen();
      }
  
@@ -144,10 +144,34 @@ index f75e16f..d74d66b 100644
 +        osd_overlay->SetPerGameOverride(osd_per_game_active);
 +    });
 +
++    const auto apply_background = [this](const QString& path) {
++        auto& renderer = system.GPU().Renderer();
++        if (path.isEmpty()) {
++            renderer.ClearBackgroundImage();
++            return;
++        }
++        QImage image(path);
++        if (image.isNull()) {
++            LOG_ERROR(Frontend, "Failed to load background image {}", path.toStdString());
++            renderer.ClearBackgroundImage();
++            return;
++        }
++        if (image.width() > 2048 || image.height() > 2048) {
++            image = image.scaled(2048, 2048, Qt::KeepAspectRatio, Qt::SmoothTransformation);
++        }
++        image = image.convertToFormat(QImage::Format_RGBX8888);
++        const auto* bits = image.constBits();
++        std::vector<u8> pixels(bits, bits + image.sizeInBytes());
++        renderer.SetBackgroundImage(std::move(pixels), image.width(), image.height());
++        LOG_INFO(Frontend, "OSD background image set {}", path.toStdString());
++    };
++    connect(osd_overlay, &OsdOverlay::backgroundImageChanged, this, apply_background);
++    apply_background(OsdOverlay::LoadBackgroundImage());
++
      OnResumeGame(true);
  }
  
-@@ -1631,6 +1717,16 @@ void GMainWindow::ShutdownGame() {
+@@ -1631,6 +1741,16 @@ void GMainWindow::ShutdownGame() {
          return;
      }
  
@@ -235,10 +259,10 @@ index b4bc976..3e2f0dd 100644
      static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs;
 diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
 new file mode 100644
-index 0000000..5521d0f
+index 0000000..a01c1ae
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.cpp
-@@ -0,0 +1,1451 @@
+@@ -0,0 +1,1514 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -260,11 +284,14 @@ index 0000000..5521d0f
 +#include <QDateTime>
 +#include <QDir>
 +#include <QFile>
++#include <QFileInfo>
 +#include <QLinearGradient>
 +#include <QPainter>
 +#include <QPainterPath>
++#include <QSettings>
 +#include <QTime>
 +#include <QTimer>
++#include "common/file_util.h"
 +#include "common/logging/log.h"
 +#include "common/settings.h"
 +#include "core/frontend/input.h"
@@ -509,6 +536,16 @@ index 0000000..5521d0f
 +    std::shared_ptr<EvdevGamepad> m_gamepad;
 +};
 +
++QString BackgroundDirectory() {
++    return QString::fromStdString(FileUtil::GetUserPath(FileUtil::UserPath::UserDir)) +
++           QStringLiteral("/backgrounds");
++}
++
++QString BackgroundSettingsFile() {
++    return QString::fromStdString(FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir)) +
++           QStringLiteral("/osd.ini");
++}
++
 +} // namespace
 +
 +OsdOverlay::OsdOverlay(QWidget* parent, const QString& game_title, bool per_game_active)
@@ -564,6 +601,36 @@ index 0000000..5521d0f
 +        m_banner_timer->stop();
 +    }
 +    hide();
++}
++
++QStringList OsdOverlay::AvailableBackgroundImages() {
++    QDir dir(BackgroundDirectory());
++    if (!dir.exists()) {
++        dir.mkpath(QStringLiteral("."));
++    }
++    const QStringList filters{QStringLiteral("*.png"), QStringLiteral("*.jpg"),
++                              QStringLiteral("*.jpeg"), QStringLiteral("*.webp"),
++                              QStringLiteral("*.bmp")};
++    QStringList images;
++    for (const QFileInfo& entry : dir.entryInfoList(filters, QDir::Files, QDir::Name)) {
++        images.append(entry.absoluteFilePath());
++    }
++    return images;
++}
++
++QString OsdOverlay::LoadBackgroundImage() {
++    QSettings settings(BackgroundSettingsFile(), QSettings::IniFormat);
++    return settings.value(QStringLiteral("background/image")).toString();
++}
++
++void OsdOverlay::SaveBackgroundImage(const QString& path) {
++    QSettings settings(BackgroundSettingsFile(), QSettings::IniFormat);
++    if (path.isEmpty()) {
++        settings.remove(QStringLiteral("background/image"));
++    } else {
++        settings.setValue(QStringLiteral("background/image"), path);
++    }
++    settings.sync();
 +}
 +
 +void OsdOverlay::SetPerGameOverride(bool active) {
@@ -659,6 +726,26 @@ index 0000000..5521d0f
 +    AddAction(video, QStringLiteral("自定义布局编辑器"),
 +              QStringLiteral("拖动、缩放上下屏"),
 +              [this] { OpenLayoutEditor(); });
++    const QStringList background_images = AvailableBackgroundImages();
++    QStringList background_choices{QStringLiteral("关闭")};
++    const QString background_current = LoadBackgroundImage();
++    int background_selected = 0;
++    for (const QString& image_path : background_images) {
++        background_choices.append(QFileInfo(image_path).fileName());
++        if (!background_current.isEmpty() && image_path == background_current) {
++            background_selected = static_cast<int>(background_choices.size()) - 1;
++        }
++    }
++    AddChoice(video, QStringLiteral("背景图片"),
++              QStringLiteral("填充布局黑边，图片放入数据目录 backgrounds"),
++              background_choices, background_selected,
++              [this, background_images](int index) {
++                  const QString path = index <= 0 ? QString() : background_images.value(index - 1);
++                  SaveBackgroundImage(path);
++                  emit backgroundImageChanged(path);
++                  ShowMessage(path.isEmpty() ? QStringLiteral("背景已关闭")
++                                             : QStringLiteral("背景已应用"));
++              });
 +    AddToggle(video, QStringLiteral("交换屏幕"), QStringLiteral("交换上下屏"),
 +              Settings::values.swap_screen);
 +    AddChoice(video, QStringLiteral("帧率上限"), QStringLiteral("模拟帧率上限"),
@@ -1692,10 +1779,10 @@ index 0000000..5521d0f
 +}
 diff --git a/src/citra_qt/osd_overlay.h b/src/citra_qt/osd_overlay.h
 new file mode 100644
-index 0000000..ed4f04d
+index 0000000..c4ca7a3
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.h
-@@ -0,0 +1,181 @@
+@@ -0,0 +1,186 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -1732,6 +1819,10 @@ index 0000000..ed4f04d
 +    void PreparePerGameOverride();
 +    void Shutdown();
 +
++    static QStringList AvailableBackgroundImages();
++    static QString LoadBackgroundImage();
++    static void SaveBackgroundImage(const QString& path);
++
 +public slots:
 +    void ShowMessage(const QString& message);
 +
@@ -1745,6 +1836,7 @@ index 0000000..ed4f04d
 +    void settingsChanged();
 +    void customLayoutChanged(bool commit);
 +    void overrideToggleRequested();
++    void backgroundImageChanged(const QString& path);
 +
 +protected:
 +    void paintEvent(QPaintEvent* event) override;
@@ -1924,3 +2016,209 @@ index 3a31142..ce75cb4 100644
  
      if (is_swapped) {
          res.top_screen = bot_screen;
+diff --git a/src/video_core/renderer_base.cpp b/src/video_core/renderer_base.cpp
+index d21d95b..925ecd0 100644
+--- a/src/video_core/renderer_base.cpp
++++ b/src/video_core/renderer_base.cpp
+@@ -66,4 +66,16 @@ void RendererBase::RequestScreenshot(void* data, std::function<void(bool)> callb
+     settings.screenshot_framebuffer_layout = layout;
+     settings.screenshot_requested = true;
+ }
++
++void RendererBase::SetBackgroundImage(std::vector<u8> rgba, u32 width, u32 height) {
++    std::scoped_lock lock{background_image_mutex};
++    background_image.rgba = std::move(rgba);
++    background_image.width = width;
++    background_image.height = height;
++    ++background_image_version;
++}
++
++void RendererBase::ClearBackgroundImage() {
++    SetBackgroundImage({}, 0, 0);
++}
+ } // namespace VideoCore
+diff --git a/src/video_core/renderer_base.h b/src/video_core/renderer_base.h
+index 4102e18..182b3f7 100644
+--- a/src/video_core/renderer_base.h
++++ b/src/video_core/renderer_base.h
+@@ -4,6 +4,8 @@
+ 
+ #pragma once
+ 
++#include <mutex>
++#include <vector>
+ #include "common/common_types.h"
+ #include "core/frontend/framebuffer_layout.h"
+ #include "video_core/rasterizer_interface.h"
+@@ -24,6 +26,12 @@ enum class ScreenId : u32 {
+     Bottom,
+ };
+ 
++struct BackgroundImage {
++    std::vector<u8> rgba;
++    u32 width = 0;
++    u32 height = 0;
++};
++
+ struct RendererSettings {
+     // Screenshot
+     std::atomic_bool screenshot_requested{false};
+@@ -104,12 +112,20 @@ public:
+     void RequestScreenshot(void* data, std::function<void(bool)> callback,
+                            const Layout::FramebufferLayout& layout);
+ 
++    /// Sets the opaque RGBA8 image drawn behind the emulated screens, empty clears it
++    void SetBackgroundImage(std::vector<u8> rgba, u32 width, u32 height);
++    void ClearBackgroundImage();
++
+ protected:
+     Core::System& system;
+     RendererSettings settings;
+     Frontend::EmuWindow& render_window;    /// Reference to the render window handle.
+     Frontend::EmuWindow* secondary_window; /// Reference to the secondary render window handle.
+ 
++    std::mutex background_image_mutex;
++    BackgroundImage background_image;  ///< Guarded by background_image_mutex.
++    u64 background_image_version = 0;  ///< Bumped whenever background_image changes.
++
+ protected:
+     f32 current_fps = 0.0f; /// Current framerate, should be set by the renderer
+     u64 current_frame = 0;  /// Current frame, should be set by the renderer
+diff --git a/src/video_core/renderer_opengl/renderer_opengl.cpp b/src/video_core/renderer_opengl/renderer_opengl.cpp
+index 09aad77..7f3d170 100644
+--- a/src/video_core/renderer_opengl/renderer_opengl.cpp
++++ b/src/video_core/renderer_opengl/renderer_opengl.cpp
+@@ -715,6 +715,7 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
+     }
+ 
+     glUniform1i(uniform_layer, 0);
++    DrawBackground(layout, stereo_single_screen);
+     if (!Settings::values.swap_screen.GetValue()) {
+         DrawTopScreen(layout, top_screen);
+         glUniform1i(uniform_layer, 0);
+@@ -738,6 +739,102 @@ void RendererOpenGL::DrawScreens(const Layout::FramebufferLayout& layout, bool f
+     ResetSecondLayerOpacity();
+ }
+ 
++void RendererOpenGL::DrawBackground(const Layout::FramebufferLayout& layout,
++                                    bool stereo_single_screen) {
++    {
++        std::scoped_lock lock{background_image_mutex};
++        if (background_image_version != background_texture_version) {
++            background_texture_version = background_image_version;
++            if (!background_texture.handle) {
++                background_texture.Create();
++            }
++
++            background_texture_width = background_image.width;
++            background_texture_height = background_image.height;
++            if (background_image.rgba.empty() || background_texture_width == 0 ||
++                background_texture_height == 0) {
++                background_texture_width = 0;
++                background_texture_height = 0;
++            } else {
++                state.texture_units[0].texture_2d = background_texture.handle;
++                state.Apply();
++
++                glActiveTexture(GL_TEXTURE0);
++                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAX_LEVEL, 0);
++                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++                glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++                glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, background_texture_width,
++                             background_texture_height, 0, GL_RGBA, GL_UNSIGNED_BYTE,
++                             background_image.rgba.data());
++
++                state.texture_units[0].texture_2d = 0;
++                state.Apply();
++            }
++        }
++    }
++
++    if (background_texture_width == 0 || background_texture_height == 0 || layout.width == 0 ||
++        layout.height == 0) {
++        return;
++    }
++
++    // Fill the framebuffer and crop the image to the window aspect ratio.
++    const double dst_aspect = static_cast<double>(layout.width) / layout.height;
++    const double img_aspect =
++        static_cast<double>(background_texture_width) / background_texture_height;
++    float u0 = 0.0f;
++    float u1 = 1.0f;
++    float v0 = 0.0f;
++    float v1 = 1.0f;
++    if (img_aspect > dst_aspect) {
++        const auto margin = static_cast<float>((1.0 - dst_aspect / img_aspect) / 2.0);
++        u0 = margin;
++        u1 = 1.0f - margin;
++    } else {
++        const auto margin = static_cast<float>((1.0 - img_aspect / dst_aspect) / 2.0);
++        v0 = margin;
++        v1 = 1.0f - margin;
++    }
++
++    // QImage rows start at the top, which OpenGL stores at v=0.
++    const auto width = static_cast<float>(layout.width);
++    const auto height = static_cast<float>(layout.height);
++    const std::array<ScreenRectVertex, 4> vertices{{
++        ScreenRectVertex(0.0f, 0.0f, u0, v0),
++        ScreenRectVertex(width, 0.0f, u1, v0),
++        ScreenRectVertex(0.0f, height, u0, v1),
++        ScreenRectVertex(width, height, u1, v1),
++    }};
++
++    const GLuint sampler = samplers[1].handle;
++    glUniform4f(uniform_i_resolution, static_cast<float>(background_texture_width),
++                static_cast<float>(background_texture_height),
++                1.0f / static_cast<float>(background_texture_width),
++                1.0f / static_cast<float>(background_texture_height));
++    glUniform4f(uniform_o_resolution, height, width, 1.0f / height, 1.0f / width);
++    glUniform1i(uniform_layer, 0);
++    state.texture_units[0].texture_2d = background_texture.handle;
++    state.texture_units[0].sampler = sampler;
++    if (stereo_single_screen) {
++        state.texture_units[1].texture_2d = background_texture.handle;
++        state.texture_units[1].sampler = sampler;
++    }
++    state.Apply();
++
++    glBufferSubData(GL_ARRAY_BUFFER, 0, sizeof(vertices), vertices.data());
++    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
++
++    state.texture_units[0].texture_2d = 0;
++    state.texture_units[0].sampler = 0;
++    if (stereo_single_screen) {
++        state.texture_units[1].texture_2d = 0;
++        state.texture_units[1].sampler = 0;
++    }
++    state.Apply();
++}
++
+ void RendererOpenGL::ApplySecondLayerOpacity(float opacity) {
+     state.blend.src_rgb_func = GL_CONSTANT_ALPHA;
+     state.blend.src_a_func = GL_CONSTANT_ALPHA;
+diff --git a/src/video_core/renderer_opengl/renderer_opengl.h b/src/video_core/renderer_opengl/renderer_opengl.h
+index 2cadc80..4ec8bc4 100644
+--- a/src/video_core/renderer_opengl/renderer_opengl.h
++++ b/src/video_core/renderer_opengl/renderer_opengl.h
+@@ -65,6 +65,7 @@ private:
+                                      const Pica::FramebufferConfig& framebuffer,
+                                      const Pica::ColorFill& color_fill);
+     void DrawScreens(const Layout::FramebufferLayout& layout, bool flipped);
++    void DrawBackground(const Layout::FramebufferLayout& layout, bool stereo_single_screen);
+     void ApplySecondLayerOpacity(float opacity = 1.0f);
+     void ResetSecondLayerOpacity();
+     void DrawBottomScreen(const Layout::FramebufferLayout& layout,
+@@ -92,6 +93,10 @@ private:
+     OGLBuffer vertex_buffer;
+     OGLProgram shader;
+     OGLFramebuffer screenshot_framebuffer;
++    OGLTexture background_texture;
++    u64 background_texture_version = 0;
++    u32 background_texture_width = 0;
++    u32 background_texture_height = 0;
+     std::array<OGLSampler, 2> samplers;
+ 
+     // Display information for top and bottom screens respectively
