@@ -12,7 +12,7 @@ Azahar（Nintendo 3DS）在 dArkOS / RK3562 上的移植记录与构建脚本。
 | 路线 | 形态 | 现状 |
 |---|---|---|
 | A. libretro 核心 | RetroArch 加载 `azahar_libretro.so` | 能编、能加载、Vulkan 正常，运行约 1.3 s 后 SIGSEGV（按用户选择暂缓） |
-| B. 独立 Qt 前端 | `azahar-qt` + Wayland/Weston | **AISLPC AIS 实机通过**：可进入关卡、ALSA PCM `RUNNING`；游戏内 OSD 可反复开关，L1/R1 翻页，存档/读档、设置和每游戏覆盖可用；Video 页可视化自定义布局编辑器可拖动/缩放双屏并保存全局布局；OSD 退出后恢复 ES；ES 的 3DS 系统可选择 `azahar-qt`（见 [docs/qt-frontend.md](docs/qt-frontend.md)） |
+| B. 独立 Qt 前端 | `azahar-qt` + Wayland/Weston | **AISLPC AIS 实机通过**：可进入关卡、ALSA PCM `RUNNING`；游戏内 OSD 可反复开关，L1/R1 翻页，存档/读档、设置和每游戏覆盖可用；Video 页可视化自定义布局编辑器可拖动/缩放双屏并保存全局布局，画布超出 1024×768 时自动等比缩放居中、双屏完整显示；OSD 退出后恢复 ES；ES 的 3DS 系统可选择 `azahar-qt`（见 [docs/qt-frontend.md](docs/qt-frontend.md)） |
 
 已验证可用、与核心无关的部分：
 
@@ -47,7 +47,7 @@ scripts/build-azahar-qt.sh build
 scripts/make-azahar-qt-bundle.sh
 ```
 
-产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `c4a30fc07d6108b6fb8e23af784f2af9a2d072d1959ed0db6ba38233fc92da62`，运行包 SHA256 为 `4d2baffde0ae4724af435a55af94491340dfb45818b9ab0acac2cab69d1fa308`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
+产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `64a160498ccf3361250752721ad752116728c66cc691ac713f60de8292225568`，运行包 SHA256 为 `1f58c7e5df5c884af5f98ca547f4d964a888066662e409ead0bbcff6a694e597`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
 
 ## 构建（libretro 核心）
 

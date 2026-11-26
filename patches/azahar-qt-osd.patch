@@ -235,10 +235,10 @@ index b4bc976..3e2f0dd 100644
      static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs;
 diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
 new file mode 100644
-index 0000000..7a85970
+index 0000000..5521d0f
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.cpp
-@@ -0,0 +1,1446 @@
+@@ -0,0 +1,1451 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -1264,10 +1264,10 @@ index 0000000..7a85970
 +    s.custom_top_y = 0;
 +    s.custom_top_width = 800;
 +    s.custom_top_height = 480;
-+    s.custom_bottom_x = 80;
-+    s.custom_bottom_y = 500;
-+    s.custom_bottom_width = 640;
-+    s.custom_bottom_height = 480;
++    s.custom_bottom_x = 240;
++    s.custom_bottom_y = 480;
++    s.custom_bottom_width = 320;
++    s.custom_bottom_height = 240;
 +    ApplyLayoutChange(false);
 +    ShowMessage(QStringLiteral("布局已恢复默认"));
 +}
@@ -1512,7 +1512,12 @@ index 0000000..7a85970
 +    draw_readout(false, info_y + static_cast<int>(26 * scale));
 +    painter.setFont(small_font);
 +    painter.setPen(QColor(132, 148, 167));
-+    const QString canvas_text = QStringLiteral("画布 %1 x %2").arg(canvas_w).arg(canvas_h);
++    const double window_fit = std::min(static_cast<double>(width()) / canvas_w,
++                                       static_cast<double>(height()) / canvas_h);
++    const QString canvas_text = QStringLiteral("画布 %1 x %2    缩放 %3%")
++                                    .arg(canvas_w)
++                                    .arg(canvas_h)
++                                    .arg(std::lround(window_fit * 100));
 +    painter.drawText(width() - margin - painter.fontMetrics().horizontalAdvance(canvas_text), info_y,
 +                     canvas_text);
 +    if (Settings::values.swap_screen.GetValue()) {
@@ -1872,3 +1877,50 @@ index 0000000..ed4f04d
 +    QTimer* m_timer = nullptr;
 +    QTimer* m_banner_timer = nullptr;
 +};
+diff --git a/src/core/frontend/framebuffer_layout.cpp b/src/core/frontend/framebuffer_layout.cpp
+index 3a31142..ce75cb4 100644
+--- a/src/core/frontend/framebuffer_layout.cpp
++++ b/src/core/frontend/framebuffer_layout.cpp
+@@ -2,6 +2,7 @@
+ // Licensed under GPLv2 or any later version
+ // Refer to the license.txt file included.
+ 
++#include <algorithm>
+ #include <cmath>
+ 
+ #include "common/assert.h"
+@@ -367,10 +368,30 @@ FramebufferLayout CustomFrameLayout(u32 width, u32 height, bool is_swapped, bool
+                                   ? Settings::values.custom_portrait_bottom_height.GetValue()
+                                   : Settings::values.custom_bottom_height.GetValue();
+ 
+-    Common::Rectangle<u32> top_screen{top_x, top_y, (u32)(top_x + top_width),
+-                                      (u32)(top_y + top_height)};
+-    Common::Rectangle<u32> bot_screen{bottom_x, bottom_y, (u32)(bottom_x + bottom_width),
+-                                      (u32)(bottom_y + bottom_height)};
++    const u32 canvas_width = std::max<u32>(
++        {1, static_cast<u32>(top_x) + top_width, static_cast<u32>(bottom_x) + bottom_width});
++    const u32 canvas_height = std::max<u32>(
++        {1, static_cast<u32>(top_y) + top_height, static_cast<u32>(bottom_y) + bottom_height});
++
++    // Custom coordinates describe a virtual canvas; scale it to fit the framebuffer, centered,
++    // so the composition is never clipped on screens smaller than the canvas. The resolution
++    // scale path passes the canvas extents as the framebuffer size, which keeps scaling at 1:1.
++    const double scale = std::min(static_cast<double>(width) / canvas_width,
++                                  static_cast<double>(height) / canvas_height);
++    const double offset_x = (static_cast<double>(width) - canvas_width * scale) / 2.0;
++    const double offset_y = (static_cast<double>(height) - canvas_height * scale) / 2.0;
++    const auto map_rect = [&](u16 x, u16 y, u16 w, u16 h) {
++        const auto map_coord = [](double value, u32 limit) {
++            return static_cast<u32>(
++                std::clamp<double>(std::lround(value), 0.0, static_cast<double>(limit)));
++        };
++        return Common::Rectangle<u32>{map_coord(offset_x + x * scale, width),
++                                      map_coord(offset_y + y * scale, height),
++                                      map_coord(offset_x + (x + w) * scale, width),
++                                      map_coord(offset_y + (y + h) * scale, height)};
++    };
++    Common::Rectangle<u32> top_screen = map_rect(top_x, top_y, top_width, top_height);
++    Common::Rectangle<u32> bot_screen = map_rect(bottom_x, bottom_y, bottom_width, bottom_height);
+ 
+     if (is_swapped) {
+         res.top_screen = bot_screen;
