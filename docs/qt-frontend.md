@@ -2,7 +2,7 @@
 
 Azahar 自带的 Qt 前端（`azahar-qt`），不经过 RetroArch。交叉编译在 x86_64 Debian/Ubuntu 上完成，不需要 root。
 
-**状态（2026-11-25）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD 和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；实体按键手感仍待人工确认。
+**状态（2026-11-26）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD、可视化自定义布局编辑器和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局；实体按键手感仍待人工确认。
 
 ## 构建与打包
 
@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`f1cb4b2088a1a878d0e08e5d13a858c32b514f3375a0a73f0f40fa542449317a`
+- SHA256：`b76e9e616be530c1db987b3e6b45cb2c591155f084f3fa1e5e092f5f2bef7bba`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `3e9e3211a4a5b9a1c22f7902616fd2907d515d8c0fc1d05eb8560589229683d8`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `365a02fbf74454bbbc66cfd809eebd814425f2193b5dc0775de1b59e31c89421`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -84,7 +84,7 @@ Renderer_GraphicsAPI: OpenGL
 
 ## 游戏内 OSD
 
-OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_DontCreateNativeAncestors`），通过 `QPainter` 绘制。`GRenderWindow` 内部的原生 `OpenGLRenderWidget` 会遮挡普通同级 QWidget，首次绘制后不再产生 `paintEvent`（表现为选择已变化但高亮不动）；成为原生 Wayland 子表面后可稳定叠在 GL 画面上方。状态变化只调用 `repaint()`，不重建表面，因此游戏画面不会闪。菜单输入直读内核 evdev：按名称定位 `rk3562-joystick`（当前为 `/dev/input/event4`），独立线程 `poll`+`read`，用原子量缓存按键与摇杆状态，再包装成 `Input::ButtonDevice`/`AnalogDevice` 供 16 ms 定时器轮询。这样菜单不经过 SDL，也不消费核心手柄事件；打开时只暂停帧推进，不停止 `EmuThread`。游戏本身输入仍走 SDL。
+OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_DontCreateNativeAncestors`），通过 `QPainter` 绘制。`GRenderWindow` 内部的原生 `OpenGLRenderWidget` 会遮挡普通同级 QWidget，首次绘制后不再产生 `paintEvent`（表现为选择已变化但高亮不动）；成为原生 Wayland 子表面后可稳定叠在 GL 画面上方。状态变化只调用 `repaint()`，不重建表面，因此游戏画面不会闪。菜单输入直读内核 evdev：按名称定位 `rk3562-joystick`（当前为 `/dev/input/event4`），独立线程以非阻塞 `read` 直接解析事件，原子量缓存按键、摇杆和按下计数；16 ms 定时器轮询时把尚未处理的按下计数补放（最多 8 次），避免主线程绘制阻塞期间丢键。这样菜单不经过 SDL，也不消费核心手柄事件；打开时只暂停帧推进，不停止 `EmuThread`。游戏本身输入仍走 SDL。
 
 改用 evdev 的原因：SDL 手柄轮询会偶发停摆（实测停过约 7 分钟），导致 Select 第一次能弹菜单、之后弹不出；而内核 evdev 始终正常投递按键。直读 evdev 让菜单按键不受 SDL 停摆影响。键码映射：Select=BTN_SELECT(314)、Start=BTN_START(315)、A=BTN_EAST(305)、B=BTN_SOUTH(304)、X=BTN_NORTH(307)、Y=BTN_WEST(308)、L1=BTN_TL(310)、R1=BTN_TR(311)、方向键=BTN_DPAD_*(544–547)，摇杆=ABS_X/ABS_Y。注意本设备物理 A/B 与标准手柄相反，与启动器 SDL 映射 `a:b1,b:b0` 一致。
 
@@ -93,14 +93,26 @@ OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_Do
 - D-pad 或左摇杆：导航；左/右调整选项；A：确认；B：返回。
 - L1 或 X：上一页；R1 或 Y：下一页（Main、Video、Audio、System、Controls 循环）。
 - 主菜单：Resume、Save/Load State、State Slot 1–10、Video、Audio、System、Controls、每游戏覆盖、Restart、Exit。
-- Video：内部Resolution、Screen Layout、Swap Screens、Frame Limit、Shader Cache。
+- Video：内部Resolution、Screen Layout、Custom Layout Editor、Swap Screens、Frame Limit、Shader Cache。
 - Audio：Volume、Audio Stretching、Realtime Audio。
 - System：New 3DS Mode、CPU Clock、Region。
 - 存档界面槽位 1–10 对应核心普通槽位 0–9；核心槽位 0 保留给 Quick Save。
-- 每游戏覆盖启用后，设置写入 `custom/<TitleID>.ini`，不调用全局 `config->Save()`；删除和重建逻辑已实现。
+- 每游戏覆盖启用后，设置写入 `custom/<TitleID>.ini`，不调用全局 `Save()`；删除和重建逻辑已实现。
 - Restart/Exit 有确认页；恢复游戏前会等待导航按钮和摇杆释放。
 
-已通过自动菜单操作验证：OSD 打开、Load State 请求、核心读档、OSD 恢复，以及 Exit 确认后结束独立会话并恢复 ES。Restart/Exit 确认页默认选中第一个可执行项，避免按 A 落在说明行上。设置保存、每游戏覆盖和 Restart 还需要进一步实机操作验证。
+### 自定义布局编辑器
+
+Screen Layout 选择 `Custom` 或进入 Video 页的 Custom Layout Editor 时，OSD 切换为布局编辑界面：屏幕上按 4:3 预览绘制上/下两个屏幕矩形（蓝色 TOP、琥珀色 BOTTOM），可实时拖动和缩放。
+
+- D-pad 或左摇杆：移动当前矩形（每步 10 px，摇杆连续触发间隔 90 ms）。
+- L1 / R1：宽度 −10 / +10 px；X / Y：高度 −10 / +10 px。
+- A：切换编辑 TOP / BOTTOM；Start：恢复默认（TOP `0,0,800,480`，BOTTOM `80,500,640,480`）。
+- B：保存并退出编辑器（菜单停留），写入全局 `[Layout] custom_*` 并应用；布局为全局一套，不随游戏保存。
+- Select：保存并恢复游戏（长按仍为退出游戏）。
+
+矩形坐标以 1024×768 为基准，最小 80×60，坐标非负、宽高上限 2048。进入编辑器时会把当前 `layout_option` 切到 Custom（值 6，按每游戏覆盖规则写入），因此编辑器里拖动即时生效；B 保存时调用 `QtConfig::SaveCustomLayoutValues()` 写全局 `custom_*`。
+
+已通过自动菜单操作验证：OSD 打开、Load State 请求、核心读档、OSD 恢复，以及 Exit 确认后结束独立会话并恢复 ES。Restart/Exit 确认页默认选中第一个可执行项，避免按 A 落在说明行上。自定义布局编辑器已用虚拟手柄逐项验证：D-pad 连续移动、L1/R1 调宽、X/Y 调高、A 切换上下屏、摇杆拖动、B 保存、Start 重置均准确；保存后全局 `custom_*` 与每游戏 `layout_option=6` 均落盘。其余设置保存、每游戏覆盖删除/重建和 Restart 还需要进一步实机操作验证。
 
 ## 低内存流式存档
 
@@ -182,6 +194,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - Wayland + Weston kiosk + OpenGL ES 3.2 / Mali-G52 显示正常。
 - OSD 可叠加在游戏画面，自动菜单操作可触发并完成读档。
 - OSD 可反复开关；方向键/摇杆切换选项时高亮跟手，游戏画面不闪。
+- 自定义布局编辑器实机验证通过：D-pad 多按逐次生效（右×3 → x=40、下×2 → y=30），L1/R1 宽度、X/Y 高度步进准确，A 切换 TOP/BOTTOM，摇杆拖动方向自然，B 保存后写入全局 `custom_*`，Start 恢复默认；每游戏覆盖保持 `layout_option=6`。
 - L1/R1 切页已实机确认：日志中 310/311 分别对应上一页/下一页，Main、Video、Audio、System、Controls 循环正常。
 - 正式版已移除 OSD 逐键/心跳/绘制诊断日志和 2 秒 fd 重开；设备 `instant_debug_log` 恢复 false。
 - 槽位 1 保存和读档通过，内存峰值约 800 MB / 738 MB，无 OOM、无临时文件残留。
@@ -193,7 +206,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 仍需人工或后续测试确认：
 
 - 实体手柄的 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认；实体长按 Select 退出尚未人工验证。
-- OSD 设置修改、每游戏覆盖创建/删除/重建、Restart 确认需继续实机验证。
+- OSD 其他设置保存、每游戏覆盖删除/重建、Restart 确认需继续实机验证。
 - 实际听感与音量。
 - Vulkan + `/opt/vita3k/wsi` 的性能与稳定性。
 - ES 前端选择器的实际按键导航需在掌机上人工确认；设备配置和命令链已验证。

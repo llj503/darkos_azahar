@@ -1,21 +1,9 @@
---- a/src/common/settings.h
-+++ b/src/common/settings.h
-@@ -528,7 +528,11 @@
-         GraphicsAPI::Software, GraphicsAPI::Vulkan, Keys::graphics_api};
-     // clang-format on
-     SwitchableSetting<u32> physical_device{0, Keys::physical_device};
-+#if defined(USING_GLES)
-+    Setting<bool> use_gles{true, Keys::use_gles};
-+#else
-     Setting<bool> use_gles{false, Keys::use_gles};
-+#endif
-     Setting<bool> renderer_debug{false, Keys::renderer_debug};
-     Setting<bool> pica_debugging{false, Keys::pica_debugging};
-     Setting<bool> dump_command_buffers{false, Keys::dump_command_buffers};
+diff --git a/src/citra_qt/bootmanager.cpp b/src/citra_qt/bootmanager.cpp
+index 79997e4..9ec3a8d 100644
 --- a/src/citra_qt/bootmanager.cpp
 +++ b/src/citra_qt/bootmanager.cpp
-@@ -751,18 +751,18 @@
-     // WA_DontCreateNativeAncestors, WA_DeleteOnClose
+@@ -751,18 +751,18 @@ bool GRenderWindow::InitializeOpenGL() {
+     // WA_DontShowOnScreen, WA_DeleteOnClose
      auto child = new OpenGLRenderWidget(this, system, is_secondary);
      child_widget = child;
 -    child_widget->windowHandle()->create();
@@ -38,3 +26,19 @@
  
      return true;
  }
+diff --git a/src/common/settings.h b/src/common/settings.h
+index c83f322..e9ae2ea 100644
+--- a/src/common/settings.h
++++ b/src/common/settings.h
+@@ -528,7 +528,11 @@ struct Values {
+         GraphicsAPI::Software, GraphicsAPI::Vulkan, Keys::graphics_api};
+     // clang-format on
+     SwitchableSetting<u32> physical_device{0, Keys::physical_device};
++#if defined(USING_GLES)
++    Setting<bool> use_gles{true, Keys::use_gles};
++#else
+     Setting<bool> use_gles{false, Keys::use_gles};
++#endif
+     Setting<bool> renderer_debug{false, Keys::renderer_debug};
+     Setting<bool> pica_debugging{false, Keys::pica_debugging};
+     Setting<bool> dump_command_buffers{false, Keys::dump_command_buffers};

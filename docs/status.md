@@ -1,4 +1,4 @@
-# 移植现状（2026-11-25）
+# 移植现状（2026-11-26）
 
 设备：AISLPC AIS，4.3 英寸 1024×768，RK3562，Debian 13 trixie，glibc 2.41，Mali G52（libmali）。设备已通过 SSH 实机测试；固定 Azahar 版本 2126.2。`/home/ark/.config/.DEVICE` 仍保留旧的 `RG52MINI` 值，设备树型号为 `AISLPC AIS`。
 
@@ -26,15 +26,16 @@
 |---|---|
 | 交叉编译 | trixie chroot，aarch64 gcc 14.2 + arm64 Qt 6.8.2，成功 |
 | 产物 | `azahar-qt`，39 MB PIE，GLIBC 上限 2.38 |
-| SHA256 | `f1cb4b2088a1a878d0e08e5d13a858c32b514f3375a0a73f0f40fa542449317a` |
+| SHA256 | `b76e9e616be530c1db987b3e6b45cb2c591155f084f3fa1e5e092f5f2bef7bba` |
 | 运行包 | `azahar-qt-bundle-2126.2.tar.zst`，59 MB（解压 153 MB），108 个库、12 个 Qt 插件 |
-| 运行包 SHA256 | `3e9e3211a4a5b9a1c22f7902616fd2907d515d8c0fc1d05eb8560589229683d8` |
+| 运行包 SHA256 | `365a02fbf74454bbbc66cfd809eebd814425f2193b5dc0775de1b59e31c89421` |
 | qemu 验证 | glibc 2.41 下 `ldd` 零缺项；三个平台插件可加载 |
 | 设备启动 | 成功进入《新超级马里奥兄弟2 黄金版 汉化版》 |
 | 显示 | AISLPC AIS 4.3 英寸 1024×768，Wayland + Weston kiosk |
 | 渲染 | OpenGL ES 3.2，ARM / Mali-G52 |
 | 声音 | ALSA PCM `RUNNING`，`Playback Path=SPK` |
-| OSD | 原生 Wayland 子表面叠在 GL 画面上；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 Main/Video/Audio/System/Controls 页；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
+| OSD | 原生 Wayland 子表面叠在 GL 画面上；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 Main/Video/Audio/System/Controls 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
+| 自定义布局 | 编辑器可拖动/缩放 TOP/BOTTOM 双屏矩形：D-pad 或摇杆移动、L1/R1 调宽、X/Y 调高、A 切屏、Start 重置、B 保存；布局为全局一套，B 时写入 `[Layout] custom_*` 并即时应用 |
 | 槽位 1 存档 | 原始约 309 MB，压缩约 20 MB，保存约 16.9 秒，峰值约 800 MB |
 | 槽位 1 读档 | 约 12.9 秒，峰值约 738 MB，`Load completed`，无临时文件残留 |
 | 手柄 GUID | `1900a4dd726b333536322d6a6f797300`，SDL 确认 `controller=true` |
@@ -48,8 +49,9 @@
 - `device/azahar-qt.sh` 通过 transient systemd service 停 ES、起 `/opt/vita3k/weston`，再以 `ark` 运行 Azahar。
 - `device/3ds.sh` 在 ES 的 Qt 分支复用 `azahar-dec.sh`，并把 `AZAHAR_USER_DIR` 指向 Qt 的 `share/azahar-emu`，避免解密包装把 NAND/SDMC 写到 RetroArch 目录。
 - 数据目录为 `share/azahar-emu`，配置为 `config/azahar-emu/qt-config.ini`，内部日志为 `share/azahar-emu/log/azahar_log.txt`。
-- `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、每游戏覆盖和确认页。
-- OSD 菜单输入直读内核 evdev（按名称定位 `rk3562-joystick`，独立线程 poll+read，原子缓存按键/摇杆），不经过 SDL，也不消费核心输入；通过 frame limiter 暂停/恢复，不停止 `EmuThread`。游戏本身输入仍走 SDL。
+- `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
+- OSD 菜单输入直读内核 evdev（按名称定位 `rk3562-joystick`，独立线程非阻塞 `read` 解析事件，原子缓存按键/摇杆按下计数，16 ms 轮询补放未处理的按下），不经过 SDL，也不消费核心输入；通过 frame limiter 暂停/恢复，不停止 `EmuThread`。游戏本身输入仍走 SDL。
+- 布局编辑器按 1024×768 基准绘制 4:3 预览和网格，蓝色 TOP / 琥珀色 BOTTOM；步长 10 px，最小 80×60，摇杆连续触发 90 ms。进入时将 `layout_option` 切到 Custom(6)，保存时 `QtConfig::SaveCustomLayoutValues()` 写全局 `custom_*`，不走每游戏覆盖。
 - OSD 使用 `WA_NativeWindow` + `WA_DontCreateNativeAncestors` 成为原生 Wayland 子表面。普通子 QWidget 在同级原生 `OpenGLRenderWidget` 存在时首次能画、之后收不到 `paintEvent`，这是“高亮不动”的真正原因；改用原生子表面后每次仅 `repaint()`，避免重建成闪烁。
 - 翻页：L1 / X 上一页，R1 / Y 下一页（Main、Video、Audio、System、Controls 循环）。
 - 每游戏设置为 `config/azahar-emu/custom/<TitleID>.ini`；启用时不写全局配置。
@@ -60,8 +62,8 @@
 
 剩余项：
 
-- 实体手柄 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认。OSD 的 Select 反复开关、方向/摇杆高亮跟手、L1/R1 翻页、画面不闪已实机确认。
-- OSD 设置修改、每游戏覆盖创建/删除/重建、Restart 确认需继续实机验证。
+- 实体手柄 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认。OSD 的 Select 反复开关、方向/摇杆高亮跟手、L1/R1 翻页、画面不闪、自定义布局编辑器已实机确认。
+- OSD 其他设置保存、每游戏覆盖删除/重建、Restart 确认需继续实机验证。
 - 实际听感未验证，只有 PCM 与输出路径证据。
 - Vulkan + `/opt/vita3k/wsi` 未验证。
 - ES 前端的选择界面与实际按键导航需在掌机上人工确认；命令入口和设备侧返回 ES 链路单独验证。
@@ -85,3 +87,6 @@
 - **OSD 按键偶发失灵**：现象是 Select 第一次能弹菜单、之后弹不出。逐层排查证明 OSD 逻辑/定时器正常、内核 evdev 始终投递按键、无进程独占手柄、设备无 runtime PM；根因是 SDL 手柄轮询间歇停摆（实测停过约 7 分钟，`raw_select` 恒 false、摇杆恒 0，按键后才恢复），且四次受控复现均未再触发，难以定点根除。改为 OSD 菜单直读 evdev 绕开 SDL，菜单按键不再受 SDL 停摆影响。
 - **OSD 高亮不动被误判为输入丢失**：evdev 日志显示按键到达且 `MoveSelection` 已执行，但选择从 0 变到 3 时没有任何 `paintEvent`。真正原因是普通子 QWidget 被同级的原生 `OpenGLRenderWidget` 遮挡，首次绘制后不再收到绘制事件。改为 `WA_NativeWindow` 原生 Wayland 子表面后解决。
 - **原生 OSD 初期切页/移动时画面闪**：每次移动都 `hide(); show();` 会重建 Wayland 子表面并扰动 GL 画面；只保留 `repaint()` 后高亮跟手且画面稳定。
+- **OSD 多次连按只算一次**：OSD 早期从不读 evdev，内核每客户端 64 事件队列填满后开始丢事件并停止更新该客户端的按键状态，导致连按丢失（右×3 只走 1 步、R1 完全丢失）。改为独立线程持续读取并直接解析事件后恢复。
+- **绘制卡顿仍会丢键**：主线程 QPainter 绘制期间到达的按键，若只靠瞬时状态轮询会被漏掉（同一按键按两次只触发一次）。改为在读取线程累计按下次数（EV_KEY value=1），16 ms 轮询时补放未处理的次数（上限 8），连按逐次生效。
+- **重置布局后仍需确认保存**：Start 只恢复默认矩形，不会自动落盘；需再按 B 保存，否则退出后仍是旧布局。
