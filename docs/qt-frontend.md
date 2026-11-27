@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`b954515e8f9d388d81db3e1da6947c438c52c375afb1028db498ba2ffff618b4`
+- SHA256：`233b139c8a2e6e2af3b7b263689035c093e453a19628de485d775fe3f0997f2b`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `fad9af7f3f8098fc3d83a01e452e31a7e17fcd8ef274b8a02a55f94f4e3e3bb9`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `4ceb13eb6069b2fb71edfafa0ec62cee5861b426ebe16b70ef84985c19b38c4a`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -94,11 +94,12 @@ OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_Do
 
 - 短按 Select：打开/关闭菜单。
 - 界面文案为简体中文 / English；系统页「界面语言」可即时切换，选择写入 `config/azahar-emu/osd.ini` 的 `[ui] language`（`zh` / `en`），重启游戏后保持。`run.sh` 的 fontconfig 会扫描设备 `/usr/share/fonts`，中文由 Noto Sans CJK SC 渲染（设备自带）。
+- 帧率显示：Video 页「显示帧率」开关写入 `osd.ini` 的 `[ui] show_fps`（默认关闭）。开启后 OSD 子表面保持可见，每 500 ms 重绘右上角半透明圆角角标（格式 `NN FPS`，无效时 `-- FPS`）；帧率取 `Core::System::GetInstance().GetLastPerfStats().game_fps`。菜单打开（暂停）时不绘制角标，返回游戏时保持；进程启动时自动恢复，长按退出/退出确认后不再重开。列表行高与可见行数由 `ListRowHeight()` / `ListVisibleRows()` 统一计算，避免长页面的选中行被底部提示栏遮挡。
 - 长按 Select 600 ms：退出游戏。
 - D-pad 或左摇杆：导航；左/右调整选项；A：确认；B：返回。
 - L1 或 X：上一页；R1 或 Y：下一页（Main、Video、Audio、System、Controls 循环）。
 - 主菜单：Resume、Save/Load State、State Slot 1–10、Video、Audio、System、Controls、每游戏覆盖、Restart、Exit。
-- Video：内部Resolution、Screen Layout、Custom Layout Editor、背景图片、Swap Screens、Frame Limit、Shader Cache。
+- Video：Graphics API、Vulkan 设备/驱动、Resolution、Screen Layout、Custom Layout Editor、Background Image、Swap Screens、Frame Limit、Show FPS、Shader Cache。
 - Audio：Volume、Audio Stretching、Realtime Audio。
 - System：New 3DS Mode、CPU Clock、Region。
 - 存档界面槽位 1–10 对应核心普通槽位 0–9；核心槽位 0 保留给 Quick Save。
@@ -213,6 +214,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - 自定义背景实机验证：1600×1200 测试图通过 OSD 选择后写入 `osd.ini`，启动日志出现 `OSD background image set`；帧缓冲回读 1024×768 左下角 `(122,61,30)`、右上角 `(27,42,74)`，与测试图对应角落颜色一致，证明背景已绘制、方向正确且在双屏之下。
 - Vulkan 驱动切换实机验证：OSD 切到 `malisx2` 后写入 `osd.ini`，退出重启后进程环境含 `VK_DRIVER_FILES=/opt/malisx2-0.6.1/malisx2.json`，日志 driverInfo 为 `v1.r44p1-malisx2.0.6.1`，以 Vulkan 进入游戏标题并可反复开关 OSD；切回 `libmali` 重启后无该变量、日志无 malisx2，游戏正常渲染。
 - OSD 中英文切换实机验证：系统页「界面语言」右切 English 后页面标题、页签、选项、提示与布局编辑器全部变为英文并显示「Language switched」，`osd.ini` 写入 `language=en`；退出并重启游戏后 OSD 直接以英文打开，左切回中文后写入 `language=zh`。
+- FPS 显示实机验证：Video 页「显示帧率」右切开启后 `osd.ini` 写入 `show_fps=true`，返回游戏右上角出现圆角角标（标题/读盘画面实测 `18 FPS`，每 500 ms 刷新）；退出重启游戏后角标自动出现，菜单打开时隐藏；切回关闭后写入 `show_fps=false`，返回游戏角标消失。同步修复长列表滚动：视频页下移到第 10 项「显示帧率」时列表自动滚动一行，选中行完整可见。
 - 中文界面逐页截图验证：主菜单、视频、音频、系统、操作说明、退出/重启确认页和布局编辑器均正常渲染，无缺字或截断。
 - L1/R1 切页已实机确认：日志中 310/311 分别对应上一页/下一页，Main、Video、Audio、System、Controls 循环正常。
 - 正式版已移除 OSD 逐键/心跳/绘制诊断日志和 2 秒 fd 重开；设备 `instant_debug_log` 恢复 false。

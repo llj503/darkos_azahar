@@ -259,10 +259,10 @@ index b4bc976..3e2f0dd 100644
      static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs;
 diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
 new file mode 100644
-index 0000000..e194bf1
+index 0000000..d2308c4
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.cpp
-@@ -0,0 +1,1657 @@
+@@ -0,0 +1,1760 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -295,6 +295,7 @@ index 0000000..e194bf1
 +#include "common/file_util.h"
 +#include "common/logging/log.h"
 +#include "common/settings.h"
++#include "core/core.h"
 +#include "core/frontend/input.h"
 +
 +// Reads the handheld gamepad straight from the kernel evdev node. The menu must keep
@@ -577,6 +578,17 @@ index 0000000..e194bf1
 +    settings.sync();
 +}
 +
++bool LoadShowFps() {
++    QSettings settings(OsdSettingsFile(), QSettings::IniFormat);
++    return settings.value(QStringLiteral("ui/show_fps"), false).toBool();
++}
++
++void SaveShowFps(bool enabled) {
++    QSettings settings(OsdSettingsFile(), QSettings::IniFormat);
++    settings.setValue(QStringLiteral("ui/show_fps"), enabled);
++    settings.sync();
++}
++
 +#ifdef ENABLE_VULKAN
 +const std::vector<QString>& VulkanDeviceNames() {
 +    static const std::vector<QString> names = GetVulkanPhysicalDevices();
@@ -601,6 +613,7 @@ index 0000000..e194bf1
 +    if (LoadEnglishLanguage()) {
 +        m_language = Language::English;
 +    }
++    m_show_fps = LoadShowFps();
 +    BuildPages();
 +    CreateInputDevices();
 +
@@ -698,6 +711,24 @@ index 0000000..e194bf1
 +    m_scroll = scroll;
 +    ShowMessage(Tr("界面语言已切换", "Language switched"));
 +    repaint();
++}
++
++void OsdOverlay::SetShowFps(bool enabled) {
++    if (m_show_fps == enabled) {
++        return;
++    }
++    m_show_fps = enabled;
++    SaveShowFps(enabled);
++    if (!m_open) {
++        if (enabled) {
++            show();
++            raise();
++            m_last_fps_paint = NowMs();
++            repaint();
++        } else {
++            hide();
++        }
++    }
 +}
 +
 +void OsdOverlay::SetPerGameOverride(bool active) {
@@ -876,6 +907,16 @@ index 0000000..e194bf1
 +               {QStringLiteral("120 FPS"), 120.0},
 +               {QStringLiteral("144 FPS"), 144.0},
 +               {QStringLiteral("200 FPS"), 200.0}});
++    AddChoice(video, Tr("显示帧率", "Show FPS"),
++              Tr("返回游戏后在右上角显示帧率",
++                 "Show the frame rate in the top-right corner"),
++              QStringList{Tr("关闭", "Off"), Tr("开启", "On")},
++              m_show_fps ? 1 : 0, [this](int index) {
++                  const bool enabled = index == 1;
++                  SetShowFps(enabled);
++                  ShowMessage(enabled ? Tr("帧率显示已开启", "FPS display on")
++                                      : Tr("帧率显示已关闭", "FPS display off"));
++              });
 +    AddToggle(video, Tr("着色器缓存", "Shader Cache"),
 +              Tr("缓存已编译着色器以加快启动",
 +                 "Cache compiled shaders for faster startup"),
@@ -947,6 +988,7 @@ index 0000000..e194bf1
 +              [this] {
 +                  hide();
 +                  m_open = false;
++                  m_exiting = true;
 +                  emit exitRequested();
 +              });
 +    AddAction(exit_confirm, Tr("取消", "Cancel"), Tr("返回菜单", "Back to menu"),
@@ -1072,8 +1114,20 @@ index 0000000..e194bf1
 +
 +void OsdOverlay::PollInput() {
 +    const qint64 now = NowMs();
-+    if (m_shutdown || !parentWidget() || !parentWidget()->isVisible()) {
++    if (m_shutdown || m_exiting || !parentWidget() || !parentWidget()->isVisible()) {
 +        return;
++    }
++
++    if (m_show_fps && !m_open) {
++        if (!isVisible()) {
++            show();
++            raise();
++            m_last_fps_paint = now;
++            repaint();
++        } else if (now - m_last_fps_paint >= 500) {
++            m_last_fps_paint = now;
++            repaint();
++        }
 +    }
 +
 +    for (size_t i = 0; i < m_buttons.size(); ++i) {
@@ -1146,6 +1200,7 @@ index 0000000..e194bf1
 +            }
 +            m_open = false;
 +            hide();
++            m_exiting = true;
 +            emit exitRequested();
 +            return;
 +        }
@@ -1283,7 +1338,14 @@ index 0000000..e194bf1
 +    m_resume_pending = false;
 +    m_open = false;
 +    LOG_INFO(Frontend, "OSD resumed");
-+    hide();
++    if (m_show_fps) {
++        show();
++        raise();
++        m_last_fps_paint = NowMs();
++        repaint();
++    } else {
++        hide();
++    }
 +    emit resumeRequested();
 +}
 +
@@ -1293,8 +1355,7 @@ index 0000000..e194bf1
 +        return;
 +    }
 +    m_selected = (m_selected + delta + static_cast<int>(rows.size())) % rows.size();
-+    const int row_height = std::max(28, ListRect().height() / 10);
-+    const int visible_rows = std::max(1, ListRect().height() / row_height);
++    const int visible_rows = ListVisibleRows();
 +    if (m_selected < m_scroll) {
 +        m_scroll = m_selected;
 +    } else if (m_selected >= m_scroll + visible_rows) {
@@ -1406,6 +1467,15 @@ index 0000000..e194bf1
 +                 panel.top() + static_cast<int>(126 * scale),
 +                 panel.width() - static_cast<int>(48 * scale),
 +                 panel.height() - static_cast<int>(202 * scale));
++}
++
++int OsdOverlay::ListRowHeight() const {
++    const qreal scale = std::clamp(std::min(width() / 1024.0, height() / 768.0), 0.75, 1.35);
++    return std::max(28, static_cast<int>(45 * scale));
++}
++
++int OsdOverlay::ListVisibleRows() const {
++    return std::max(1, ListRect().height() / ListRowHeight());
 +}
 +
 +OsdOverlay::LayoutRect OsdOverlay::GetLayoutRect(bool top) const {
@@ -1768,11 +1838,44 @@ index 0000000..e194bf1
 +                     painter.fontMetrics().elidedText(hint_text, Qt::ElideRight, width() - margin * 2));
 +}
 +
++void OsdOverlay::PaintFpsBadge(QPainter& painter) {
++    const qreal scale = std::clamp(std::min(width() / 1024.0, height() / 768.0), 0.75, 1.35);
++    const double fps = Core::System::GetInstance().GetLastPerfStats().game_fps;
++    const QString text = fps > 0.05 ? QStringLiteral("%1 FPS").arg(fps, 0, 'f', 0)
++                                    : QStringLiteral("-- FPS");
++
++    QFont font = QApplication::font();
++    font.setPixelSize(static_cast<int>(18 * scale));
++    font.setBold(true);
++    painter.setFont(font);
++    const int pad_x = static_cast<int>(10 * scale);
++    const int pad_y = static_cast<int>(5 * scale);
++    const int margin = static_cast<int>(12 * scale);
++    const int text_width = painter.fontMetrics().horizontalAdvance(text);
++    const int badge_width = text_width + pad_x * 2;
++    const int badge_height = painter.fontMetrics().height() + pad_y * 2;
++    const QRect badge(width() - margin - badge_width, margin, badge_width, badge_height);
++
++    QPainterPath path;
++    path.addRoundedRect(badge, static_cast<int>(8 * scale), static_cast<int>(8 * scale));
++    painter.fillPath(path, QColor(13, 18, 27, 200));
++    painter.setPen(QPen(QColor(72, 205, 231, 200), static_cast<qreal>(1.5 * scale)));
++    painter.drawPath(path);
++    painter.setPen(QColor(100, 231, 250));
++    painter.drawText(badge, Qt::AlignCenter, text);
++}
++
 +void OsdOverlay::paintEvent(QPaintEvent*) {
 +    QPainter painter(this);
 +    painter.setRenderHint(QPainter::Antialiasing);
 +    if (m_layout_editor) {
 +        PaintLayoutEditor(painter);
++        return;
++    }
++    if (!m_open) {
++        if (m_show_fps) {
++            PaintFpsBadge(painter);
++        }
 +        return;
 +    }
 +    painter.fillRect(rect(), QColor(0, 0, 0, 155));
@@ -1836,8 +1939,8 @@ index 0000000..e194bf1
 +    }
 +
 +    const QRect list = ListRect();
-+    const int row_height = static_cast<int>(45 * scale);
-+    const int visible_rows = std::max(1, list.height() / row_height);
++    const int row_height = ListRowHeight();
++    const int visible_rows = ListVisibleRows();
 +    const auto& rows = m_pages[m_current_page].rows;
 +    m_scroll = std::clamp(m_scroll, 0, std::max(0, static_cast<int>(rows.size()) - visible_rows));
 +
@@ -1914,7 +2017,7 @@ index 0000000..e194bf1
 +bool OsdOverlay::eventFilter(QObject* watched, QEvent* event) {
 +    if (watched == parentWidget() && event->type() == QEvent::Resize) {
 +        setGeometry(parentWidget()->rect());
-+        if (m_open) {
++        if (m_open || (m_show_fps && isVisible())) {
 +            raise();
 +        }
 +    }
@@ -1922,10 +2025,10 @@ index 0000000..e194bf1
 +}
 diff --git a/src/citra_qt/osd_overlay.h b/src/citra_qt/osd_overlay.h
 new file mode 100644
-index 0000000..7c0dc4c
+index 0000000..0992d03
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.h
-@@ -0,0 +1,190 @@
+@@ -0,0 +1,197 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -2023,6 +2126,8 @@ index 0000000..7c0dc4c
 +    void BuildPages();
 +    QString Tr(const char* zh, const char* en) const;
 +    void SetLanguage(Language language);
++    void SetShowFps(bool enabled);
++    void PaintFpsBadge(QPainter& painter);
 +    void AddAction(Page& page, const QString& label, const QString& hint,
 +                   std::function<void()> activate);
 +    void AddInfo(Page& page, const QString& label, const QString& hint = {});
@@ -2060,6 +2165,8 @@ index 0000000..7c0dc4c
 +    void ReadBattery();
 +    QRect PanelRect() const;
 +    QRect ListRect() const;
++    int ListRowHeight() const;
++    int ListVisibleRows() const;
 +
 +    struct LayoutRect {
 +        int x = 0;
@@ -2092,6 +2199,8 @@ index 0000000..7c0dc4c
 +    bool m_open = false;
 +    bool m_resume_pending = false;
 +    bool m_layout_editor = false;
++    bool m_show_fps = false;
++    bool m_exiting = false;
 +    bool m_layout_top = true;
 +    int m_layout_return_selection = 0;
 +    qint64 m_layout_stick_last = 0;
@@ -2103,6 +2212,7 @@ index 0000000..7c0dc4c
 +    QString m_banner;
 +    int m_battery = -1;
 +    qint64 m_last_battery_read = 0;
++    qint64 m_last_fps_paint = 0;
 +
 +    std::shared_ptr<EvdevGamepad> m_gamepad;
 +    std::array<std::unique_ptr<Input::ButtonDevice>, static_cast<size_t>(Button::Count)> m_buttons;
