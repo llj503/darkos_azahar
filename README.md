@@ -49,7 +49,7 @@ scripts/build-azahar-qt.sh build
 scripts/make-azahar-qt-bundle.sh
 ```
 
-产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `233b139c8a2e6e2af3b7b263689035c093e453a19628de485d775fe3f0997f2b`，运行包 SHA256 为 `4ceb13eb6069b2fb71edfafa0ec62cee5861b426ebe16b70ef84985c19b38c4a`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
+产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `7993ab005921deb0d7075979ea1ec942a5d0dfcd34d90a0f173cc61b08e6edd3`，运行包 SHA256 为 `baf156355553aae55155b0d26fff9a149d9cf931aca994ea49a82025e43afe15`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
 
 ## 构建（libretro 核心）
 
