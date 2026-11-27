@@ -26,16 +26,16 @@
 |---|---|
 | 交叉编译 | trixie chroot，aarch64 gcc 14.2 + arm64 Qt 6.8.2，成功 |
 | 产物 | `azahar-qt`，39 MB PIE，GLIBC 上限 2.38 |
-| SHA256 | `e9e136f008f0fc57dd6f90ad3474a1668f1f54ecc6cb2dac789a760b7835b938` |
+| SHA256 | `b954515e8f9d388d81db3e1da6947c438c52c375afb1028db498ba2ffff618b4` |
 | 运行包 | `azahar-qt-bundle-2126.2.tar.zst`，59 MB（解压 153 MB），108 个库、12 个 Qt 插件 |
-| 运行包 SHA256 | `590c97f687975fb809e987f006b0afb8100a5c961227b9419e2035beeed2eed8` |
+| 运行包 SHA256 | `fad9af7f3f8098fc3d83a01e452e31a7e17fcd8ef274b8a02a55f94f4e3e3bb9` |
 | qemu 验证 | glibc 2.41 下 `ldd` 零缺项；三个平台插件可加载 |
 | 设备启动 | 成功进入《新超级马里奥兄弟2 黄金版 汉化版》 |
 | 显示 | AISLPC AIS 4.3 英寸 1024×768，Wayland + Weston kiosk |
 | 渲染 | OpenGL ES 3.2，ARM / Mali-G52；Vulkan（libmali / malisx2 ICD）可选 |
 | 图形接口 | OSD 视频页「图形接口」可切 OpenGL / Vulkan（全局配置，重启游戏生效）；Vulkan 经 `/opt/vita3k/wsi` 隐式 WSI 层实机进游戏，OSD 反复开关、翻页正常；另有「Vulkan 驱动」可在 libmali / malisx2 间切换，malisx2 0.6.1 实机跑通进游戏与 OSD 操作；默认 OpenGL + libmali |
 | 声音 | ALSA PCM `RUNNING`，`Playback Path=SPK` |
-| OSD | 原生 Wayland 子表面叠在 GL 画面上，界面为简体中文；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 主菜单/视频/音频/系统/操作说明 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
+| OSD | 原生 Wayland 子表面叠在 GL 画面上，界面支持简体中文 / English（系统页切换，写入 `osd.ini` 持久化）；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 主菜单/视频/音频/系统/操作说明 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
 | 自定义布局 | 编辑器可拖动/缩放 TOP/BOTTOM 双屏矩形：D-pad 或摇杆移动、L1/R1 调宽、X/Y 调高、A 切屏、Start 重置、B 保存；布局为全局一套，B 时写入 `[Layout] custom_*` 并即时应用；画布超出 1024×768 时自动等比缩放居中，双屏完整显示 |
 | 自定义背景 | Video 页「背景图片」从 `share/azahar-emu/backgrounds/` 发现 png/jpg/jpeg/webp/bmp，即时生效并持久化到 `config/azahar-emu/osd.ini`；OpenGL 渲染器在双屏之下绘制全屏背景并等比裁剪，实机帧缓冲回读四角像素与测试图一致 |
 | 槽位 1 存档 | 原始约 309 MB，压缩约 20 MB，保存约 16.9 秒，峰值约 800 MB |
@@ -53,7 +53,8 @@
 - Qt 6.8 Wayland 的 OSD 重开：全屏 WSI 子表面遮挡主窗口后，Weston 不再回主窗口的 frame callback；Qt 6.8 100 ms 超时后把主窗口置为 inexposed（`QWaylandWindow::isExposed()` 对子表面取父窗口状态），之后 OSD 子表面 `show()` 不再收到 expose，表现为 Vulkan 下 OSD 只有第一次打开能上屏。启动器设置 `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0` 禁用该超时，Vulkan / OpenGL 各连续 3 轮开关与翻页均正常。
 - `device/3ds.sh` 在 ES 的 Qt 分支复用 `azahar-dec.sh`，并把 `AZAHAR_USER_DIR` 指向 Qt 的 `share/azahar-emu`，避免解密包装把 NAND/SDMC 写到 RetroArch 目录。
 - 数据目录为 `share/azahar-emu`，配置为 `config/azahar-emu/qt-config.ini`，内部日志为 `share/azahar-emu/log/azahar_log.txt`。
-- `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：简体中文界面、短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
+- `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：简体中文 / English 双语界面、短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
+- 界面语言：系统页「界面语言」（中文 / English）即时重建全部页面与提示，写入 `osd.ini` 的 `[ui] language`（`zh` / `en`，默认中文）；进程启动时读取，因此重启游戏后保持。文案集中在 `Tr(中文, English)` 辅助函数，覆盖菜单、页签、横幅提示、布局编辑器和底部按键提示。
 - OSD 菜单输入直读内核 evdev（按名称定位 `rk3562-joystick`，独立线程非阻塞 `read` 解析事件，原子缓存按键/摇杆按下计数，16 ms 轮询补放未处理的按下），不经过 SDL，也不消费核心输入；通过 frame limiter 暂停/恢复，不停止 `EmuThread`。游戏本身输入仍走 SDL。
 - 布局编辑器按 4:3 预览和网格绘制，蓝色 TOP / 琥珀色 BOTTOM；步长 10 px，最小 80×60，上限 2048，摇杆连续触发 90 ms。自定义坐标构成虚拟画布，`Layout::CustomFrameLayout` 按窗口等比缩放并居中（截图/录像路径传画布尺寸，保持 1:1），编辑器同步显示「缩放 N%」。进入时将 `layout_option` 切到 Custom(6)，保存时 `QtConfig::SaveCustomLayoutValues()` 写全局 `custom_*`，不走每游戏覆盖。
 - 自定义背景由 Qt 前端用 `QImage` 解码（RGBX8888，超过 2048 先缩放），经 `RendererBase::SetBackgroundImage` 线程安全地交给 OpenGL 渲染器；`RendererOpenGL::DrawBackground` 在 `DrawScreens` 清屏后、双屏之前上传纹理并绘制全屏四边形，等比裁剪填满窗口。核心没有图像解码器，因此解码放在前端；Vulkan 后端暂不实现。选择结果写入独立的 `config/azahar-emu/osd.ini`，不参与核心设置，也不随每游戏覆盖保存。

@@ -2,7 +2,7 @@
 
 Azahar 自带的 Qt 前端（`azahar-qt`），不经过 RetroArch。交叉编译在 x86_64 Debian/Ubuntu 上完成，不需要 root。
 
-**状态（2026-11-26）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD（简体中文界面）、可视化自定义布局编辑器、自定义背景图片和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局，画布超出窗口时由渲染器等比缩放居中、不会裁切；实体按键手感仍待人工确认。
+**状态（2026-11-27）**：固定版本 2126.2 的 Qt 前端、游戏内 OSD（简体中文 / English）、可视化自定义布局编辑器、自定义背景图片和低内存流式存档已在 AISLPC AIS（4.3 英寸 1024×768，RK3562 / Debian 13 / glibc 2.41 / Mali G52）上运行。测试 ROM 为《新超级马里奥兄弟2 黄金版 汉化版》：标题菜单可进入关卡，ALSA PCM 为 `RUNNING`；槽位 1 保存和读档均已实机通过。OSD 可反复开关、方向高亮跟手、L1/R1 切页且游戏画面不闪；布局编辑器可拖动/缩放双屏矩形并保存为全局布局，画布超出窗口时由渲染器等比缩放居中、不会裁切；实体按键手感仍待人工确认。
 
 ## 构建与打包
 
@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`e9e136f008f0fc57dd6f90ad3474a1668f1f54ecc6cb2dac789a760b7835b938`
+- SHA256：`b954515e8f9d388d81db3e1da6947c438c52c375afb1028db498ba2ffff618b4`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `590c97f687975fb809e987f006b0afb8100a5c961227b9419e2035beeed2eed8`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `fad9af7f3f8098fc3d83a01e452e31a7e17fcd8ef274b8a02a55f94f4e3e3bb9`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -93,7 +93,7 @@ OSD 是 `GRenderWindow` 上的透明原生子表面（`WA_NativeWindow` + `WA_Do
 改用 evdev 的原因：SDL 手柄轮询会偶发停摆（实测停过约 7 分钟），导致 Select 第一次能弹菜单、之后弹不出；而内核 evdev 始终正常投递按键。直读 evdev 让菜单按键不受 SDL 停摆影响。键码映射：Select=BTN_SELECT(314)、Start=BTN_START(315)、A=BTN_EAST(305)、B=BTN_SOUTH(304)、X=BTN_NORTH(307)、Y=BTN_WEST(308)、L1=BTN_TL(310)、R1=BTN_TR(311)、方向键=BTN_DPAD_*(544–547)，摇杆=ABS_X/ABS_Y。注意本设备物理 A/B 与标准手柄相反，与启动器 SDL 映射 `a:b1,b:b0` 一致。
 
 - 短按 Select：打开/关闭菜单。
-- 界面文案为简体中文；`run.sh` 的 fontconfig 会扫描设备 `/usr/share/fonts`，中文由 Noto Sans CJK SC 渲染（设备自带）。
+- 界面文案为简体中文 / English；系统页「界面语言」可即时切换，选择写入 `config/azahar-emu/osd.ini` 的 `[ui] language`（`zh` / `en`），重启游戏后保持。`run.sh` 的 fontconfig 会扫描设备 `/usr/share/fonts`，中文由 Noto Sans CJK SC 渲染（设备自带）。
 - 长按 Select 600 ms：退出游戏。
 - D-pad 或左摇杆：导航；左/右调整选项；A：确认；B：返回。
 - L1 或 X：上一页；R1 或 Y：下一页（Main、Video、Audio、System、Controls 循环）。
@@ -212,6 +212,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - 布局自适应验证：全局 `custom_*` 为 1710×1270 画布时，1024×768 下按 60% 缩放居中，运行日志实测布局矩形 top `(6,4–641,477)`、bottom `(641,477–1024,764)`，全部位于窗口内，无裁切。
 - 自定义背景实机验证：1600×1200 测试图通过 OSD 选择后写入 `osd.ini`，启动日志出现 `OSD background image set`；帧缓冲回读 1024×768 左下角 `(122,61,30)`、右上角 `(27,42,74)`，与测试图对应角落颜色一致，证明背景已绘制、方向正确且在双屏之下。
 - Vulkan 驱动切换实机验证：OSD 切到 `malisx2` 后写入 `osd.ini`，退出重启后进程环境含 `VK_DRIVER_FILES=/opt/malisx2-0.6.1/malisx2.json`，日志 driverInfo 为 `v1.r44p1-malisx2.0.6.1`，以 Vulkan 进入游戏标题并可反复开关 OSD；切回 `libmali` 重启后无该变量、日志无 malisx2，游戏正常渲染。
+- OSD 中英文切换实机验证：系统页「界面语言」右切 English 后页面标题、页签、选项、提示与布局编辑器全部变为英文并显示「Language switched」，`osd.ini` 写入 `language=en`；退出并重启游戏后 OSD 直接以英文打开，左切回中文后写入 `language=zh`。
 - 中文界面逐页截图验证：主菜单、视频、音频、系统、操作说明、退出/重启确认页和布局编辑器均正常渲染，无缺字或截断。
 - L1/R1 切页已实机确认：日志中 310/311 分别对应上一页/下一页，Main、Video、Audio、System、Controls 循环正常。
 - 正式版已移除 OSD 逐键/心跳/绘制诊断日志和 2 秒 fd 重开；设备 `instant_debug_log` 恢复 false。
