@@ -259,10 +259,10 @@ index b4bc976..3e2f0dd 100644
      static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs;
 diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
 new file mode 100644
-index 0000000..b5f2435
+index 0000000..bb5e568
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.cpp
-@@ -0,0 +1,1547 @@
+@@ -0,0 +1,1578 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -542,9 +542,26 @@ index 0000000..b5f2435
 +           QStringLiteral("/backgrounds");
 +}
 +
-+QString BackgroundSettingsFile() {
++QString OsdSettingsFile() {
 +    return QString::fromStdString(FileUtil::GetUserPath(FileUtil::UserPath::ConfigDir)) +
 +           QStringLiteral("/osd.ini");
++}
++
++bool Malisx2Installed() {
++    return QFileInfo::exists(QStringLiteral("/opt/malisx2-0.6.1/malisx2.json")) ||
++           QFileInfo::exists(QStringLiteral("/opt/malisx2/malisx2.json"));
++}
++
++QString LoadVulkanDriver() {
++    QSettings settings(OsdSettingsFile(), QSettings::IniFormat);
++    const QString driver = settings.value(QStringLiteral("vulkan/driver")).toString();
++    return driver == QStringLiteral("malisx2") ? driver : QStringLiteral("libmali");
++}
++
++void SaveVulkanDriver(const QString& driver) {
++    QSettings settings(OsdSettingsFile(), QSettings::IniFormat);
++    settings.setValue(QStringLiteral("vulkan/driver"), driver);
++    settings.sync();
 +}
 +
 +#ifdef ENABLE_VULKAN
@@ -627,12 +644,12 @@ index 0000000..b5f2435
 +}
 +
 +QString OsdOverlay::LoadBackgroundImage() {
-+    QSettings settings(BackgroundSettingsFile(), QSettings::IniFormat);
++    QSettings settings(OsdSettingsFile(), QSettings::IniFormat);
 +    return settings.value(QStringLiteral("background/image")).toString();
 +}
 +
 +void OsdOverlay::SaveBackgroundImage(const QString& path) {
-+    QSettings settings(BackgroundSettingsFile(), QSettings::IniFormat);
++    QSettings settings(OsdSettingsFile(), QSettings::IniFormat);
 +    if (path.isEmpty()) {
 +        settings.remove(QStringLiteral("background/image"));
 +    } else {
@@ -740,6 +757,20 @@ index 0000000..b5f2435
 +        AddChoice(video, QStringLiteral("Vulkan 设备"),
 +                  QStringLiteral("物理显卡，重启游戏后生效"),
 +                  Settings::values.physical_device, device_choices);
++    }
++    if (Malisx2Installed()) {
++        const bool malisx2 = LoadVulkanDriver() == QStringLiteral("malisx2");
++        AddChoice(video, QStringLiteral("Vulkan 驱动"),
++                  QStringLiteral("Mali Vulkan ICD，重启游戏后生效"),
++                  QStringList{QStringLiteral("libmali"), QStringLiteral("malisx2")},
++                  malisx2 ? 1 : 0, [this](int index) {
++                      SaveVulkanDriver(index == 1 ? QStringLiteral("malisx2")
++                                                  : QStringLiteral("libmali"));
++                      ShowMessage(QStringLiteral("Vulkan 驱动已保存"));
++                  });
++    } else {
++        AddInfo(video, QStringLiteral("Vulkan 驱动"),
++                QStringLiteral("仅 libmali（未安装 malisx2）"));
 +    }
 +#endif
 +    AddChoice(video, QStringLiteral("分辨率"), QStringLiteral("内部渲染分辨率"),

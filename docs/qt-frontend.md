@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`9a67d63c168c4bb8f0ec4e92d36df4aec00e65aa4c3b116ec562aee3448c7cc3`
+- SHA256：`e9e136f008f0fc57dd6f90ad3474a1668f1f54ecc6cb2dac789a760b7835b938`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `2240ad004ab39f31b66ce130503abfbca45b8483d9371d245ee3d6f9c0b05749`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `590c97f687975fb809e987f006b0afb8100a5c961227b9419e2035beeed2eed8`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -66,7 +66,9 @@ GL_RENDERER: Mali-G52
 Renderer_GraphicsAPI: OpenGL
 ```
 
-启动器不再固定 `[Renderer] graphics_api`：OSD 视频页「图形接口」可切换 OpenGL / Vulkan（写全局 `qt-config.ini`，同时写 `graphics_api\default=false`，否则 `default=true` 会把值强制回默认；重启游戏生效）。Vulkan 依赖 libvulkan + ICD `rk_vk.json`（libmali G52）和 `/opt/vita3k/wsi` 的隐式 WSI 层，启动器自动注入 `VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi`；两条路径均已在 AISLPC AIS 上进入游戏并完成 OSD 反复开关、翻页验证，默认仍为 OpenGL。
+启动器不再固定 `[Renderer] graphics_api`：OSD 视频页「图形接口」可切换 OpenGL / Vulkan（写全局 `qt-config.ini`，同时写 `graphics_api\default=false`，否则 `default=true` 会把值强制回默认；重启游戏生效）。Vulkan 依赖 libvulkan + 默认 ICD `rk_vk.json`（libmali G52）和 `/opt/vita3k/wsi` 的隐式 WSI 层，启动器自动注入 `VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi`；两条路径均已在 AISLPC AIS 上进入游戏并完成 OSD 反复开关、翻页验证，默认仍为 OpenGL。
+
+同一页还有「Vulkan 驱动」，可在 `libmali` / `malisx2` 间切换，选择写入 `config/azahar-emu/osd.ini` 的 `[vulkan] driver`（与背景图片设置共用该文件）。启动器读取后只在 `malisx2` 时注入 `VK_DRIVER_FILES`，优先 `/opt/malisx2-0.6.1/malisx2.json`，其次 `/opt/malisx2/malisx2.json`；未安装时 OSD 该行只显示「仅 libmali」，启动器回退系统 ICD 并在日志告警。`libmali` 不设该变量。malisx2 0.6.1 已在实机上以 Vulkan 进入游戏并完成 OSD 开关、翻页与退出；其 API 为 Vulkan 1.1、仅实现 ARMSX2 调用集且历史实测比 libmali 慢 13–20%，因此默认仍用 libmali。
 
 Vulkan 下 OSD 只有首次打开能上屏是 Qt 6.8 Wayland 的问题：全屏 WSI 子表面遮挡主窗口后，Weston 不再回主窗口的 frame callback，Qt 6.8 超时（100 ms）后把主窗口标记为 inexposed；OSD 子表面的 `isExposed()` 取父窗口状态，因此重开时不再收到 expose，`QWidget` 不绘制、表面不 attach。启动器设置 `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0` 关闭该超时后问题消失（该变量由 `QWaylandWindow` 构造函数读取，`0` 表示不启动超时定时器）。
 
@@ -82,7 +84,7 @@ Vulkan 下 OSD 只有首次打开能上屏是 Qt 6.8 Wayland 的问题：全屏 
 - Qt/Weston 日志：`logs/azahar-qt.log`、`logs/weston.log`
 - Azahar 内部日志：`share/azahar-emu/log/azahar_log.txt`
 
-`run.sh` 会写入 OpenGL 设置和 `dArkOS` 输入 profile。调试时若看内部日志没有及时刷新，可临时启用 `[Debugging] instant_debug_log=true`，同时把 `instant_debug_log\default` 设为 false；Info 日志默认会被缓冲，强制 SIGKILL 可能丢失未刷新内容。
+`run.sh` 会写入 `dArkOS` 输入 profile。调试时若看内部日志没有及时刷新，可临时启用 `[Debugging] instant_debug_log=true`，同时把 `instant_debug_log\default` 设为 false；Info 日志默认会被缓冲，强制 SIGKILL 可能丢失未刷新内容。
 
 ## 游戏内 OSD
 
@@ -209,6 +211,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - 自定义布局编辑器实机验证通过：D-pad 多按逐次生效（右×3 → x=40、下×2 → y=30），L1/R1 宽度、X/Y 高度步进准确，A 切换 TOP/BOTTOM，摇杆拖动方向自然，B 保存后写入全局 `custom_*`，Start 恢复默认；每游戏覆盖保持 `layout_option=6`。
 - 布局自适应验证：全局 `custom_*` 为 1710×1270 画布时，1024×768 下按 60% 缩放居中，运行日志实测布局矩形 top `(6,4–641,477)`、bottom `(641,477–1024,764)`，全部位于窗口内，无裁切。
 - 自定义背景实机验证：1600×1200 测试图通过 OSD 选择后写入 `osd.ini`，启动日志出现 `OSD background image set`；帧缓冲回读 1024×768 左下角 `(122,61,30)`、右上角 `(27,42,74)`，与测试图对应角落颜色一致，证明背景已绘制、方向正确且在双屏之下。
+- Vulkan 驱动切换实机验证：OSD 切到 `malisx2` 后写入 `osd.ini`，退出重启后进程环境含 `VK_DRIVER_FILES=/opt/malisx2-0.6.1/malisx2.json`，日志 driverInfo 为 `v1.r44p1-malisx2.0.6.1`，以 Vulkan 进入游戏标题并可反复开关 OSD；切回 `libmali` 重启后无该变量、日志无 malisx2，游戏正常渲染。
 - 中文界面逐页截图验证：主菜单、视频、音频、系统、操作说明、退出/重启确认页和布局编辑器均正常渲染，无缺字或截断。
 - L1/R1 切页已实机确认：日志中 310/311 分别对应上一页/下一页，Main、Video、Audio、System、Controls 循环正常。
 - 正式版已移除 OSD 逐键/心跳/绘制诊断日志和 2 秒 fd 重开；设备 `instant_debug_log` 恢复 false。
@@ -223,5 +226,5 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - 实体手柄的 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认；实体长按 Select 退出尚未人工验证。
 - OSD 其他设置保存、每游戏覆盖删除/重建、Restart 确认需继续实机验证。
 - 实际听感与音量。
-- Vulkan 长时间运行的性能与稳定性。
+- Vulkan 长时间运行的性能与稳定性；malisx2 仅验证了进游戏与 OSD，未进入关卡测帧率。
 - ES 前端选择器的实际按键导航需在掌机上人工确认；设备配置和命令链已验证。

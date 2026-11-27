@@ -256,6 +256,22 @@ fi
 # 禁用该超时，避免 OSD 第二次打开起不上屏。
 QT_WAYLAND_ENV=(QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0)
 
+# Vulkan 驱动由 OSD 视频页写入 [vulkan] driver；malisx2 需要显式指定 ICD。
+VK_ICD_ENV=()
+VK_DRIVER=$(sed -n '/^\[vulkan\]/,/^\[/s/^driver=//p' \
+    "$DATA/config/azahar-emu/osd.ini" 2>/dev/null | head -1)
+if [ "$VK_DRIVER" = "malisx2" ]; then
+    for icd in /opt/malisx2-0.6.1/malisx2.json /opt/malisx2/malisx2.json; do
+        if [ -r "$icd" ]; then
+            VK_ICD_ENV=(VK_DRIVER_FILES="$icd")
+            break
+        fi
+    done
+    if [ ${#VK_ICD_ENV[@]} -eq 0 ]; then
+        echo "azahar-qt: malisx2 未安装，使用系统 Vulkan ICD" >&2
+    fi
+fi
+
 runuser -u ark -- env \
     HOME=/home/ark USER=ark LOGNAME=ark \
     XDG_RUNTIME_DIR="$RTDIR" WAYLAND_DISPLAY="$SOCK" \
@@ -266,4 +282,5 @@ runuser -u ark -- env \
     SDL_AUDIODRIVER=alsa SDL_GAMECONTROLLERCONFIG="$SDL_GAMECONTROLLERCONFIG" \
     "${QT_WAYLAND_ENV[@]}" \
     "${VK_LAYER_ENV[@]}" \
+    "${VK_ICD_ENV[@]}" \
     "$B/azahar-qt" "${ARGS[@]}" >"$DATA/logs/azahar-qt.log" 2>&1

@@ -26,14 +26,14 @@
 |---|---|
 | 交叉编译 | trixie chroot，aarch64 gcc 14.2 + arm64 Qt 6.8.2，成功 |
 | 产物 | `azahar-qt`，39 MB PIE，GLIBC 上限 2.38 |
-| SHA256 | `9a67d63c168c4bb8f0ec4e92d36df4aec00e65aa4c3b116ec562aee3448c7cc3` |
+| SHA256 | `e9e136f008f0fc57dd6f90ad3474a1668f1f54ecc6cb2dac789a760b7835b938` |
 | 运行包 | `azahar-qt-bundle-2126.2.tar.zst`，59 MB（解压 153 MB），108 个库、12 个 Qt 插件 |
-| 运行包 SHA256 | `2240ad004ab39f31b66ce130503abfbca45b8483d9371d245ee3d6f9c0b05749` |
+| 运行包 SHA256 | `590c97f687975fb809e987f006b0afb8100a5c961227b9419e2035beeed2eed8` |
 | qemu 验证 | glibc 2.41 下 `ldd` 零缺项；三个平台插件可加载 |
 | 设备启动 | 成功进入《新超级马里奥兄弟2 黄金版 汉化版》 |
 | 显示 | AISLPC AIS 4.3 英寸 1024×768，Wayland + Weston kiosk |
-| 渲染 | OpenGL ES 3.2，ARM / Mali-G52；Vulkan（libmali ICD）可选 |
-| 图形接口 | OSD 视频页「图形接口」可切 OpenGL / Vulkan（全局配置，重启游戏生效）；Vulkan 经 `/opt/vita3k/wsi` 隐式 WSI 层实机进游戏，OSD 反复开关、翻页正常；默认 OpenGL |
+| 渲染 | OpenGL ES 3.2，ARM / Mali-G52；Vulkan（libmali / malisx2 ICD）可选 |
+| 图形接口 | OSD 视频页「图形接口」可切 OpenGL / Vulkan（全局配置，重启游戏生效）；Vulkan 经 `/opt/vita3k/wsi` 隐式 WSI 层实机进游戏，OSD 反复开关、翻页正常；另有「Vulkan 驱动」可在 libmali / malisx2 间切换，malisx2 0.6.1 实机跑通进游戏与 OSD 操作；默认 OpenGL + libmali |
 | 声音 | ALSA PCM `RUNNING`，`Playback Path=SPK` |
 | OSD | 原生 Wayland 子表面叠在 GL 画面上，界面为简体中文；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 主菜单/视频/音频/系统/操作说明 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
 | 自定义布局 | 编辑器可拖动/缩放 TOP/BOTTOM 双屏矩形：D-pad 或摇杆移动、L1/R1 调宽、X/Y 调高、A 切屏、Start 重置、B 保存；布局为全局一套，B 时写入 `[Layout] custom_*` 并即时应用；画布超出 1024×768 时自动等比缩放居中，双屏完整显示 |
@@ -48,7 +48,8 @@
 关键实现：
 
 - `device/azahar-qt.sh` 通过 transient systemd service 停 ES、起 `/opt/vita3k/weston`，再以 `ark` 运行 Azahar。
-- 图形接口切换：核心设置 `Settings::values.graphics_api`（Software=0 / OpenGL=1 / Vulkan=2）。OSD 写全局 `qt-config.ini` 时必须同时写 `graphics_api\default=false`，否则 `default=true` 会在加载时强制回默认值；每游戏覆盖走 `graphics_api\use_global`。启动器不再固定 OpenGL，只负责注入 Vulkan 运行环境：libvulkan + ICD `rk_vk.json`（libmali G52）和 `VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi`（vita3k 的 WSI 是隐式层，`VK_LAYER_PATH` 枚举不到）。`GetVulkanPhysicalDevices()` 在查询前后保存/恢复 Vulkan-Hpp 默认 dispatcher，否则 headless `Vulkan::Instance` 会改写全局 dispatcher，之后 `Swapchain::SetPresentMode` 崩溃。
+- Vulkan 驱动选择：OSD 视频页「Vulkan 驱动」写 `config/azahar-emu/osd.ini` 的 `[vulkan] driver`（`libmali` / `malisx2`，与背景图片共用该文件）。启动器读取后仅在 malisx2 时注入 `VK_DRIVER_FILES`，优先 `/opt/malisx2-0.6.1/malisx2.json`、其次 `/opt/malisx2/malisx2.json`，都缺失则回退系统 ICD 并告警；libmali 不设该变量，走 `/usr/share/vulkan/icd.d/rk_vk.json`。未安装 malisx2 时该行只显示「仅 libmali」。malisx2 0.6.1（Vulkan 1.1，driverInfo `v1.r44p1-malisx2.0.6.1`）用于验证驱动切换，默认仍 libmali。
+- 图形接口切换：核心设置 `Settings::values.graphics_api`（Software=0 / OpenGL=1 / Vulkan=2）。OSD 写全局 `qt-config.ini` 时必须同时写 `graphics_api\default=false`，否则 `default=true` 会在加载时强制回默认值；每游戏覆盖走 `graphics_api\use_global`。启动器不再固定 OpenGL，只负责注入 Vulkan 运行环境：libvulkan + 默认 ICD `rk_vk.json`（libmali G52，可用上述「Vulkan 驱动」覆盖）和 `VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi`（vita3k 的 WSI 是隐式层，`VK_LAYER_PATH` 枚举不到）。`GetVulkanPhysicalDevices()` 在查询前后保存/恢复 Vulkan-Hpp 默认 dispatcher，否则 headless `Vulkan::Instance` 会改写全局 dispatcher，之后 `Swapchain::SetPresentMode` 崩溃。
 - Qt 6.8 Wayland 的 OSD 重开：全屏 WSI 子表面遮挡主窗口后，Weston 不再回主窗口的 frame callback；Qt 6.8 100 ms 超时后把主窗口置为 inexposed（`QWaylandWindow::isExposed()` 对子表面取父窗口状态），之后 OSD 子表面 `show()` 不再收到 expose，表现为 Vulkan 下 OSD 只有第一次打开能上屏。启动器设置 `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0` 禁用该超时，Vulkan / OpenGL 各连续 3 轮开关与翻页均正常。
 - `device/3ds.sh` 在 ES 的 Qt 分支复用 `azahar-dec.sh`，并把 `AZAHAR_USER_DIR` 指向 Qt 的 `share/azahar-emu`，避免解密包装把 NAND/SDMC 写到 RetroArch 目录。
 - 数据目录为 `share/azahar-emu`，配置为 `config/azahar-emu/qt-config.ini`，内部日志为 `share/azahar-emu/log/azahar_log.txt`。

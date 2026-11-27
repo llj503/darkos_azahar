@@ -12,13 +12,13 @@ Azahar（Nintendo 3DS）在 dArkOS / RK3562 上的移植记录与构建脚本。
 | 路线 | 形态 | 现状 |
 |---|---|---|
 | A. libretro 核心 | RetroArch 加载 `azahar_libretro.so` | 能编、能加载、Vulkan 正常，运行约 1.3 s 后 SIGSEGV（按用户选择暂缓） |
-| B. 独立 Qt 前端 | `azahar-qt` + Wayland/Weston | **AISLPC AIS 实机通过**：可进入关卡、ALSA PCM `RUNNING`；游戏内 OSD 可反复开关，L1/R1 翻页，存档/读档、设置和每游戏覆盖可用；Video 页可在 Vulkan/OpenGL 间切换图形接口（写全局配置，重启游戏生效），Vulkan 经 `/opt/vita3k/wsi` 隐式 WSI 层实机验证；Video 页可视化自定义布局编辑器可拖动/缩放双屏并保存全局布局，画布超出 1024×768 时自动等比缩放居中、双屏完整显示；可为布局黑边选择自定义背景图片，保存在 `backgrounds/` 目录并在游戏画面下方居中裁剪绘制；OSD 退出后恢复 ES；ES 的 3DS 系统可选择 `azahar-qt`（见 [docs/qt-frontend.md](docs/qt-frontend.md)） |
+| B. 独立 Qt 前端 | `azahar-qt` + Wayland/Weston | **AISLPC AIS 实机通过**：可进入关卡、ALSA PCM `RUNNING`；游戏内 OSD 可反复开关，L1/R1 翻页，存档/读档、设置和每游戏覆盖可用；Video 页可在 Vulkan/OpenGL 间切换图形接口（写全局配置，重启游戏生效），Vulkan 经 `/opt/vita3k/wsi` 隐式 WSI 层实机验证，并可在 libmali/malisx2 两种 Vulkan 驱动间切换（malisx2 需预装，默认 libmali）；Video 页可视化自定义布局编辑器可拖动/缩放双屏并保存全局布局，画布超出 1024×768 时自动等比缩放居中、双屏完整显示；可为布局黑边选择自定义背景图片，保存在 `backgrounds/` 目录并在游戏画面下方居中裁剪绘制；OSD 退出后恢复 ES；ES 的 3DS 系统可选择 `azahar-qt`（见 [docs/qt-frontend.md](docs/qt-frontend.md)） |
 
 已验证可用、与核心无关的部分：
 
 - Qt 正式版：Mali-G52 / OpenGL ES 3.2 显示，PCM `RUNNING`，Select+Start 退出后 ES、killer_daemon、ogage 和 `SPK` 输出恢复
 - per-core 配置 `config/Azahar/Azahar.cfg`：让 RetroArch 只对 Azahar 用 Vulkan，不需要 `--appendconfig` 包装
-- Vulkan ICD 选 libmali（不是 malisx2）：Azahar 在 malisx2 上慢 13–20%
+- Vulkan ICD 默认选 libmali（不是 malisx2）：Azahar 在 malisx2 上慢 13–20%；OSD 视频页「Vulkan 驱动」可在 libmali/malisx2 间切换，2026-11 用 malisx2 0.6.1 实机跑通 Vulkan 进游戏与 OSD 操作
 
 Qt 路线剩余人工体验项，详见 [docs/status.md](docs/status.md)。
 
@@ -47,7 +47,7 @@ scripts/build-azahar-qt.sh build
 scripts/make-azahar-qt-bundle.sh
 ```
 
-产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `9a67d63c168c4bb8f0ec4e92d36df4aec00e65aa4c3b116ec562aee3448c7cc3`，运行包 SHA256 为 `2240ad004ab39f31b66ce130503abfbca45b8483d9371d245ee3d6f9c0b05749`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
+产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `e9e136f008f0fc57dd6f90ad3474a1668f1f54ecc6cb2dac789a760b7835b938`，运行包 SHA256 为 `590c97f687975fb809e987f006b0afb8100a5c961227b9419e2035beeed2eed8`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
 
 ## 构建（libretro 核心）
 
