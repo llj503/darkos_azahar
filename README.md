@@ -32,7 +32,7 @@ docs/status.md                # 移植现状与实测数据
 docs/qt-frontend.md           # Qt 前端：构建、运行包、设备部署与验证清单
 docs/gcc-compat.md            # 用 gcc 编 2126.2 需要改的三处
 docs/azahar-nano-osd.md       # azahar-nano 的 OSD 菜单结构分析
-device/                        # 设备文件：azahar-qt.sh（Weston 启动器）、3ds.sh（ES 入口）
+device/                        # 设备文件：azahar-qt.sh（Weston 启动器，安装为 /opt/azahar/run.sh）
 scripts/ns-chroot.sh          # 免 root 的 trixie chroot（用户命名空间）
 scripts/build-azahar-qt.sh    # 交叉编译 Qt 前端
 scripts/make-azahar-qt-bundle.sh  # 连同 Qt 运行库打成设备运行包
@@ -49,7 +49,16 @@ scripts/build-azahar-qt.sh build
 scripts/make-azahar-qt-bundle.sh
 ```
 
-产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。正式二进制 SHA256 为 `7993ab005921deb0d7075979ea1ec942a5d0dfcd34d90a0f173cc61b08e6edd3`，运行包 SHA256 为 `baf156355553aae55155b0d26fff9a149d9cf931aca994ea49a82025e43afe15`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
+Qt 独立端关键参数（2026-11-27 起启用 LTO）：
+
+```
+-DENABLE_LTO=ON                    # CMake 映射为 -flto=auto -fno-fat-lto-objects
+-march=armv8-a -moutline-atomics   # A53 只有 ARMv8.0，不能有 LSE 指令
+-fno-math-errno                    # 避免 sqrtf 等绑定到 GLIBC_2.43
+-static-libstdc++ -static-libgcc
+```
+
+产物在 `~/darkos-build/out/`：`azahar-qt-arm64-2126.2` 和 `azahar-qt-bundle-2126.2.tar.zst`。LTO 正式二进制 SHA256 为 `d32558c016b6636e036592c710f4df5df07bc812813b6e2d6f945970ce32911b`，运行包 SHA256 为 `a6145ae77f092c8ae7594ae7421625c6bcb32b5190dcda9e6a52009372bbbcfb`。部署与 EmulationStation 配置见 [docs/qt-frontend.md](docs/qt-frontend.md)。
 
 ## 构建（libretro 核心）
 
@@ -71,6 +80,7 @@ bash scripts/build-azahar-libretro.sh
 ## 上游关键结论
 
 - 官方 aarch64 包不能用：ARMv8.1/LSE 指令在 A53 上 SIGILL
+- 核心沿用 clang + PGO；LTO 在 PGO 之上没有额外收益且需要 lld，因此核心保持 `ENABLE_LTO=OFF`；Qt 独立端单独启用 GCC LTO
 - `ENABLE_OPENGL=ON` + `-DUSING_GLES`，否则 RetroArch 的 gl 驱动起不来
 - 存档走 zstd 流式（patch 012），加载不预问尺寸（RetroArch patch 0024），否则每次读档先序列化整个 292 MB 状态
 - 纹理上传环从 512 MiB 降到 128 MiB（patch 028），Mali 驱动不可换出，省 345 MB

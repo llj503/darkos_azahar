@@ -56,8 +56,9 @@ CMAKE_CMD='export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/sh
 	-DCMAKE_PREFIX_PATH=/usr/lib/aarch64-linux-gnu/cmake \
 	-DENABLE_QT=ON -DENABLE_LIBRETRO=OFF -DENABLE_SDL2=ON -DENABLE_OPENGL=ON \
 	-DENABLE_QT_TRANSLATION=OFF -DENABLE_QT_UPDATE_CHECKER=OFF \
-	-DENABLE_TESTS=OFF -DENABLE_LTO=OFF -DCITRA_WARNINGS_AS_ERRORS=OFF \
-	-DCMAKE_CXX_FLAGS="-DUSING_GLES" \
+	-DENABLE_TESTS=OFF -DENABLE_LTO=ON -DCITRA_WARNINGS_AS_ERRORS=OFF \
+	-DCMAKE_C_FLAGS="-DUSING_GLES -march=armv8-a -moutline-atomics -fno-math-errno" \
+	-DCMAKE_CXX_FLAGS="-DUSING_GLES -march=armv8-a -moutline-atomics -fno-math-errno" \
 	-DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"'
 
 build() {

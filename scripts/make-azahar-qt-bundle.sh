@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 把 azahar-qt 打成设备上解压即用的运行包：二进制 + 私有 lib/ + Qt 插件 + 启动脚本。
+# 把 azahar-qt 打成设备上解压即用的运行包：二进制 + 私有 libs/ + Qt 插件 + 启动脚本。
 #
 # 闭包里的库都取自 trixie 的 arm64 包，所以不依赖设备镜像装了哪些包。
 # 不带两类库：glibc（必须用设备的加载器）和图形驱动（设备上 libEGL、libGLESv2、
@@ -69,7 +69,7 @@ extract() {
 # 算闭包并摆好目录。任何 NEEDED 都解析不到就报错退出，不给出一个缺库的包。
 resolve() {
 	rm -rf "$BUNDLE"
-	mkdir -p "$BUNDLE/lib" "$BUNDLE/qt-plugins"
+	mkdir -p "$BUNDLE/libs" "$BUNDLE/qt-plugins"
 	cp "$BIN" "$BUNDLE/azahar-qt"
 	install -m 755 "$ROOT/device/azahar-qt.sh" "$BUNDLE/run.sh"
 	# Qt 的文字全靠 fontconfig。镜像里有没有 fontconfig 的配置文件不确定，没有它 Qt 一个字也画不出来，
@@ -153,11 +153,11 @@ def take(n, used_by):
         missing.setdefault(n, used_by)
         return
     # 以 SONAME 命名：加载器按这个名字找
-    dst = os.path.join(bundle, "lib", n)
+    dst = os.path.join(bundle, "libs", n)
     if not os.path.exists(dst):
         shutil.copy2(src, dst)
         pkg = owner.get(os.path.relpath(src, pool), "?")
-        manifest.append(f"{pkg}\tlib/{n}")
+        manifest.append(f"{pkg}\tlibs/{n}")
         queue.append(dst)
 
 queue.append(os.path.join(bundle, "azahar-qt"))
@@ -176,15 +176,14 @@ if missing:
     sys.exit(1)
 with open(os.path.join(bundle, "LIBS.txt"), "w") as f:
     f.write("# 运行包里的每个库来自哪个 trixie 包\n" + "\n".join(sorted(manifest, key=lambda s: s.split("\t")[1])) + "\n")
-print(f"lib/ {len(os.listdir(os.path.join(bundle, 'lib')))} 个库，qt-plugins/ 下 "
+print(f"libs/ {len(os.listdir(os.path.join(bundle, 'libs')))} 个库，qt-plugins/ 下 "
       f"{sum(len(fs) for _, _, fs in os.walk(os.path.join(bundle, 'qt-plugins')))} 个插件")
 PY
 }
 
 pack() {
-	install -m 755 "$ROOT/device/3ds.sh" "$STAGE/3ds.sh"
 	local tgz="$OUT/azahar-qt-bundle-$TAG.tar.zst"
-	tar -C "$STAGE" --zstd -cf "$tgz" azahar 3ds.sh
+	tar -C "$STAGE" --zstd -cf "$tgz" azahar
 	{
 		echo "运行包: $tgz"
 		ls -lh "$tgz" "$BUNDLE/azahar-qt"

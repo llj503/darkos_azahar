@@ -23,12 +23,12 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 正式二进制：
 
 - 文件：`out/azahar-qt-arm64-2126.2`
-- 大小：40 MB，AArch64 PIE
-- SHA256：`7993ab005921deb0d7075979ea1ec942a5d0dfcd34d90a0f173cc61b08e6edd3`
+- 大小：36 MB，AArch64 PIE，GCC 14.2 + LTO（`-flto=auto -fno-fat-lto-objects`）
+- SHA256：`d32558c016b6636e036592c710f4df5df07bc812813b6e2d6f945970ce32911b`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `baf156355553aae55155b0d26fff9a149d9cf931aca994ea49a82025e43afe15`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 58 MB，解压约 149 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `a6145ae77f092c8ae7594ae7421625c6bcb32b5190dcda9e6a52009372bbbcfb`。库以 SONAME 放在 `libs/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -41,10 +41,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 ```sh
 sudo tar -xf azahar-qt-bundle-2126.2.tar.zst -C /opt   # 得到 /opt/azahar/
-sudo install -m 755 device/3ds.sh /usr/local/bin/3ds.sh
+# ES 入口在 dArkOS4RK3562 的 rootfs/usr/local/bin/azahar.sh
+sudo install -m 755 <dArkOS4RK3562>/rootfs/usr/local/bin/azahar.sh /usr/local/bin/azahar.sh
 ```
 
-`/opt/azahar/` 包含 `azahar-qt`、`run.sh`、`lib/`、`qt-plugins/`、`fonts.conf`、`fonts/` 和 `LIBS.txt`。
+`/opt/azahar/` 包含 `azahar-qt`、`run.sh`、`libs/`、`qt-plugins/`、`fonts.conf`、`fonts/` 和 `LIBS.txt`。
 
 Weston 使用设备已有的 `/opt/vita3k/weston`，不需要安装 `weston` 包。启动器通过 transient systemd service 运行：停止 ES、取得 DRM master、启动 Weston kiosk，再以 `ark` 用户运行 Azahar。不要只给 Weston 加 sudo，否则会丢失 `XDG_RUNTIME_DIR` 等环境。
 
@@ -183,12 +184,12 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 
 ## EmulationStation 集成
 
-仓库中的 `device/3ds.sh` 支持 `%EMULATOR%=azahar-qt`，为空或 `retroarch`/`azahar` 时仍走原 libretro 核心。Qt 分支设置 `AZAHAR_BIN=/opt/azahar/run.sh` 和 `AZAHAR_USER_DIR=<ROM 所在分区>/3ds/azahar/share/azahar-emu` 后调用设备原有的 `azahar-dec.sh`，因此保留 CIA 解密、更新/DLC 安装和字库处理，并让它们写入 Qt 自己的 NAND/SDMC。
+dArkOS4RK3562 的 `rootfs/usr/local/bin/azahar.sh` 是唯一的 ES 入口，支持 `%EMULATOR%=azahar-qt`；为空或 `retroarch`/`azahar` 时仍走原 libretro 核心。两条路径都先调用设备原有的 `azahar-dec.sh`：核心分支经解密后回到 `azahar.sh` 启动 RetroArch；Qt 分支设置 `AZAHAR_BIN=/opt/azahar/run.sh` 和 `AZAHAR_USER_DIR=<ROM 所在分区>/3ds/azahar/share/azahar-emu`，因此保留 CIA 解密、更新/DLC 安装和字库处理，并让它们写入 Qt 自己的 NAND/SDMC。
 
 设备 `/etc/emulationstation/es_systems.cfg` 的 3DS system 使用以下配置。该 ES 会在启动时按 SD 卡模式从 `es_systems.cfg.sd1`、`.sd2` 或 `.dual` 覆盖活动文件，因此三个模板也已同步修改；修改前备份为同名 `.pre-azahar-qt-20261125`：
 
 ```xml
-<command>sudo perfmax %GOVERNOR% %ROM%; nice -n -19 /usr/local/bin/3ds.sh %EMULATOR% %ROM%; sudo perfnorm</command>
+<command>sudo perfmax %GOVERNOR% %ROM%; nice -n -19 /usr/local/bin/azahar.sh %EMULATOR% %ROM%; sudo perfnorm</command>
 <emulators>
 	<emulator name="retroarch">
 		<cores>
@@ -223,7 +224,7 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - ALSA PCM `RUNNING`，输出路径 `SPK`。
 - 旧 Select+Start 退出可恢复 ES、killer_daemon、ogage 和音频路径。
 - OSD Exit 确认已自动验证：Azahar 进程结束，transient session 变为 inactive，ES 恢复 active。
-- ES XML 校验通过并已重启加载；活动配置及三个 SD 卡模板都保留 `azahar-qt`。使用 ES 的 `3ds.sh azahar-qt` 命令链实机启动正式二进制成功，停止会话后 ES 恢复。
+- ES XML 校验通过并已重启加载；活动配置及三个 SD 卡模板都保留 `azahar-qt`。使用新的 `azahar.sh azahar-qt <ROM>` 入口实机启动 LTO 正式二进制成功：解密后进入 `/opt/azahar/run.sh`，Weston + malisx2 Vulkan 初始化 DSP/存档，约 30 秒无崩溃；停止会话后 ES、killer_daemon、ogage 和 ALSA 恢复。核心分支仍走原 `azahar.sh` 的 RetroArch + malisx2/Vulkan 逻辑。
 
 仍需人工或后续测试确认：
 

@@ -277,7 +277,7 @@ runuser -u ark -- env \
     XDG_RUNTIME_DIR="$RTDIR" WAYLAND_DISPLAY="$SOCK" \
     QT_QPA_PLATFORM=wayland \
     XDG_DATA_HOME="$DATA/share" XDG_CONFIG_HOME="$DATA/config" XDG_CACHE_HOME="$DATA/cache" \
-    LD_LIBRARY_PATH="$B/lib:/usr/local/lib" QT_PLUGIN_PATH="$B/qt-plugins" \
+    LD_LIBRARY_PATH="$B/libs:/usr/local/lib" QT_PLUGIN_PATH="$B/qt-plugins" \
     FONTCONFIG_FILE="$B/fonts.conf" LD_PRELOAD="$WL_CLIENT" \
     SDL_AUDIODRIVER=alsa SDL_GAMECONTROLLERCONFIG="$SDL_GAMECONTROLLERCONFIG" \
     "${QT_WAYLAND_ENV[@]}" \
