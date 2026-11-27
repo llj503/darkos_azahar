@@ -73,10 +73,18 @@
 - 实体手柄 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认。OSD 的 Select 反复开关、方向/摇杆高亮跟手、L1/R1 翻页、画面不闪、自定义布局编辑器已实机确认；FPS 角标的开关、500 ms 刷新、重启保持、关闭消失与英文文案已实机确认。
 - OSD 其他设置保存（模拟速度已验证）、每游戏覆盖删除/重建、Restart 确认需继续实机验证。
 - 实际听感未验证，只有 PCM 与输出路径证据。
-- Vulkan 长时间运行性能和稳定性仍建议抽样观察。
+- Vulkan 长时间运行性能与稳定性：关卡内偶发 0 FPS 卡顿，正在定位（见下节）。
 - ES 前端的选择界面与实际按键导航需在掌机上人工确认；命令入口和设备侧返回 ES 链路单独验证。
 
 流程、部署和完整验证记录见 [qt-frontend.md](qt-frontend.md)。
+
+## 关卡内偶发 0 FPS 卡顿（排查中）
+
+- 现象：Vulkan（libmali，Vulkan 1.3.303）进入 W1-2 后偶发游戏帧计数归零约 1 秒。`game_fps` 只在 `GPU::SetBufferSwap` 计数（`EndGameFrame`），说明是仿真侧停帧，不是显示/角标刷新问题。关卡内约 36 FPS，EmuThread 接近 100% 单核；温度约 79 °C（CPU 85 °C 才触发降频），MemAvailable 约 330 MB，SD 无持续读写，暂未发现 OOM、热降频或 IO 常驻。
+- 线程级监控：100 ms 遍历全部线程的版本自身占约 27% CPU，已弃用；改为 250 ms 只采样 EmuThread / VulkanWorker / VulkanPresent / FSUSER_Worker / mali-cmar 等关键线程。首轮未捕获 ≥0.4 s 的 EmuThread 停顿，仍需在实机游玩时继续观察。
+- 着色器缓存文件在游玩过程中持续追加（21:40、21:43、21:45），说明仍在不断遇到新着色器；`async_shader_compilation` 原为关闭，新管线首次出现时会在渲染队列里同步 `WaitDone()`，是首要嫌疑。已把 `custom/0004000000137E00.ini` 覆盖为 `async_shader_compilation=true`（`use_global=false`），**需退出重进游戏生效**，待实机验证。
+- 启动日志有 QtWayland 警告「Non-blocking swap buffers not supported… may also cause the event loop to freeze」；FPS 角标每 500 ms 重绘子表面，是否与卡顿相关，可用关闭 `show_fps` 对比。
+- 当前会话实际为 libmali；`osd.ini` 已设 `malisx2`，下次启动才切换。验证卡顿时应固定驱动，避免混淆变量。
 
 ## 经过的弯路
 
