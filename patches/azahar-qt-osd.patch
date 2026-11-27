@@ -259,10 +259,10 @@ index b4bc976..3e2f0dd 100644
      static const std::array<std::array<int, 5>, Settings::NativeAnalog::NumAnalogs> default_analogs;
 diff --git a/src/citra_qt/osd_overlay.cpp b/src/citra_qt/osd_overlay.cpp
 new file mode 100644
-index 0000000..a01c1ae
+index 0000000..b5f2435
 --- /dev/null
 +++ b/src/citra_qt/osd_overlay.cpp
-@@ -0,0 +1,1514 @@
+@@ -0,0 +1,1547 @@
 +// Copyright 2026 Azahar Emulator Project
 +// Licensed under GPLv2 or any later version
 +// Refer to the license.txt file included.
@@ -291,6 +291,7 @@ index 0000000..a01c1ae
 +#include <QSettings>
 +#include <QTime>
 +#include <QTimer>
++#include "citra_qt/util/graphics_device_info.h"
 +#include "common/file_util.h"
 +#include "common/logging/log.h"
 +#include "common/settings.h"
@@ -546,6 +547,13 @@ index 0000000..a01c1ae
 +           QStringLiteral("/osd.ini");
 +}
 +
++#ifdef ENABLE_VULKAN
++const std::vector<QString>& VulkanDeviceNames() {
++    static const std::vector<QString> names = GetVulkanPhysicalDevices();
++    return names;
++}
++#endif
++
 +} // namespace
 +
 +OsdOverlay::OsdOverlay(QWidget* parent, const QString& game_title, bool per_game_active)
@@ -709,6 +717,31 @@ index 0000000..a01c1ae
 +               kExitConfirmPage);
 +
 +    Page& video = m_pages[kVideoPage];
++    std::vector<std::pair<QString, Settings::GraphicsAPI>> api_choices;
++#ifdef ENABLE_OPENGL
++    api_choices.emplace_back(QStringLiteral("OpenGL"), Settings::GraphicsAPI::OpenGL);
++#endif
++#ifdef ENABLE_VULKAN
++    api_choices.emplace_back(QStringLiteral("Vulkan"), Settings::GraphicsAPI::Vulkan);
++#endif
++    AddChoice(video, QStringLiteral("图形接口"), QStringLiteral("渲染后端，重启游戏后生效"),
++              Settings::values.graphics_api, api_choices);
++#ifdef ENABLE_VULKAN
++    const std::vector<QString>& vulkan_devices = VulkanDeviceNames();
++    if (vulkan_devices.empty()) {
++        AddInfo(video, QStringLiteral("Vulkan 设备"),
++                QStringLiteral("未检测到可用的 Vulkan 设备"));
++    } else {
++        std::vector<std::pair<QString, u32>> device_choices;
++        device_choices.reserve(vulkan_devices.size());
++        for (u32 index = 0; index < vulkan_devices.size(); ++index) {
++            device_choices.emplace_back(vulkan_devices[index], index);
++        }
++        AddChoice(video, QStringLiteral("Vulkan 设备"),
++                  QStringLiteral("物理显卡，重启游戏后生效"),
++                  Settings::values.physical_device, device_choices);
++    }
++#endif
 +    AddChoice(video, QStringLiteral("分辨率"), QStringLiteral("内部渲染分辨率"),
 +              Settings::values.resolution_factor,
 +              {{QStringLiteral("原生"), 1u},
@@ -1969,6 +2002,29 @@ index 0000000..c4ca7a3
 +    QTimer* m_timer = nullptr;
 +    QTimer* m_banner_timer = nullptr;
 +};
+diff --git a/src/citra_qt/util/graphics_device_info.cpp b/src/citra_qt/util/graphics_device_info.cpp
+index da2ba7c..0584db2 100644
+--- a/src/citra_qt/util/graphics_device_info.cpp
++++ b/src/citra_qt/util/graphics_device_info.cpp
+@@ -33,6 +33,10 @@ QString GetOpenGLRenderer() {
+ #ifdef ENABLE_VULKAN
+ std::vector<QString> GetVulkanPhysicalDevices() {
+     std::vector<QString> result;
++    // The temporary headless instance re-initializes the process-wide Vulkan-Hpp dispatcher with
++    // its own instance/device; surface entry points end up null because the headless instance does
++    // not enable VK_KHR_surface. Preserve the dispatcher of a running renderer across the query.
++    const auto saved_dispatcher = VULKAN_HPP_DEFAULT_DISPATCHER;
+     try {
+         Vulkan::Instance instance{};
+         const auto physical_devices = instance.GetPhysicalDevices();
+@@ -44,6 +48,7 @@ std::vector<QString> GetVulkanPhysicalDevices() {
+     } catch (const std::runtime_error& err) {
+         LOG_ERROR(Frontend, "Error occured while querying for physical devices: {}", err.what());
+     }
++    VULKAN_HPP_DEFAULT_DISPATCHER = saved_dispatcher;
+ 
+     return result;
+ }
 diff --git a/src/core/frontend/framebuffer_layout.cpp b/src/core/frontend/framebuffer_layout.cpp
 index 3a31142..ce75cb4 100644
 --- a/src/core/frontend/framebuffer_layout.cpp

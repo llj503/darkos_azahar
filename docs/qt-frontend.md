@@ -24,11 +24,11 @@ scripts/make-azahar-qt-bundle.sh repack   # 库已取好，只重新算闭包并
 
 - 文件：`out/azahar-qt-arm64-2126.2`
 - 大小：39 MB，AArch64 PIE
-- SHA256：`51987065d4e1bfa4e55ac219f1d6e2508f984a4dd370f01fe6a3349346849cdd`
+- SHA256：`9a67d63c168c4bb8f0ec4e92d36df4aec00e65aa4c3b116ec562aee3448c7cc3`
 - GLIBC 上限：2.38（设备为 2.41）
 - NEEDED：Qt6 Widgets/Multimedia/Gui/DBus/Concurrent/Core、libm、libmvec、libc、ld-linux
 
-运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `2d6c96589318c6a540cb3a742b44cd8d717e3c3fbb5368679999aa0f720c3b65`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
+运行包约 59 MB，解压约 153 MB，包含 108 个库和 12 个 Qt 插件。运行包 SHA256 为 `2240ad004ab39f31b66ce130503abfbca45b8483d9371d245ee3d6f9c0b05749`。库以 SONAME 放在 `lib/`，由启动器设置 `LD_LIBRARY_PATH`；哈希同时记录在 `out/azahar-qt-bundle-2126.2.txt`。
 
 不带入运行包的库：
 
@@ -66,7 +66,9 @@ GL_RENDERER: Mali-G52
 Renderer_GraphicsAPI: OpenGL
 ```
 
-`run.sh` 将 `[Renderer] graphics_api` 固定为 OpenGL。Vulkan 需要 Wayland/X11，并依赖 `/opt/vita3k/wsi` 的 libmali WSI layer；本项目尚未验证 Vulkan，不把它作为默认路径。
+启动器不再固定 `[Renderer] graphics_api`：OSD 视频页「图形接口」可切换 OpenGL / Vulkan（写全局 `qt-config.ini`，同时写 `graphics_api\default=false`，否则 `default=true` 会把值强制回默认；重启游戏生效）。Vulkan 依赖 libvulkan + ICD `rk_vk.json`（libmali G52）和 `/opt/vita3k/wsi` 的隐式 WSI 层，启动器自动注入 `VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi`；两条路径均已在 AISLPC AIS 上进入游戏并完成 OSD 反复开关、翻页验证，默认仍为 OpenGL。
+
+Vulkan 下 OSD 只有首次打开能上屏是 Qt 6.8 Wayland 的问题：全屏 WSI 子表面遮挡主窗口后，Weston 不再回主窗口的 frame callback，Qt 6.8 超时（100 ms）后把主窗口标记为 inexposed；OSD 子表面的 `isExposed()` 取父窗口状态，因此重开时不再收到 expose，`QWidget` 不绘制、表面不 attach。启动器设置 `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0` 关闭该超时后问题消失（该变量由 `QWaylandWindow` 构造函数读取，`0` 表示不启动超时定时器）。
 
 ## 数据、配置与日志
 
@@ -221,5 +223,5 @@ Azahar profile 使用标准 SDL controller 编号：A=0、B=1、X=2、Y=3、Back
 - 实体手柄的 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认；实体长按 Select 退出尚未人工验证。
 - OSD 其他设置保存、每游戏覆盖删除/重建、Restart 确认需继续实机验证。
 - 实际听感与音量。
-- Vulkan + `/opt/vita3k/wsi` 的性能与稳定性。
+- Vulkan 长时间运行的性能与稳定性。
 - ES 前端选择器的实际按键导航需在掌机上人工确认；设备配置和命令链已验证。

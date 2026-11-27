@@ -1,4 +1,4 @@
-# 移植现状（2026-11-26）
+# 移植现状（2026-11-27）
 
 设备：AISLPC AIS，4.3 英寸 1024×768，RK3562，Debian 13 trixie，glibc 2.41，Mali G52（libmali）。设备已通过 SSH 实机测试；固定 Azahar 版本 2126.2。`/home/ark/.config/.DEVICE` 仍保留旧的 `RG52MINI` 值，设备树型号为 `AISLPC AIS`。
 
@@ -26,13 +26,14 @@
 |---|---|
 | 交叉编译 | trixie chroot，aarch64 gcc 14.2 + arm64 Qt 6.8.2，成功 |
 | 产物 | `azahar-qt`，39 MB PIE，GLIBC 上限 2.38 |
-| SHA256 | `51987065d4e1bfa4e55ac219f1d6e2508f984a4dd370f01fe6a3349346849cdd` |
+| SHA256 | `9a67d63c168c4bb8f0ec4e92d36df4aec00e65aa4c3b116ec562aee3448c7cc3` |
 | 运行包 | `azahar-qt-bundle-2126.2.tar.zst`，59 MB（解压 153 MB），108 个库、12 个 Qt 插件 |
-| 运行包 SHA256 | `2d6c96589318c6a540cb3a742b44cd8d717e3c3fbb5368679999aa0f720c3b65` |
+| 运行包 SHA256 | `2240ad004ab39f31b66ce130503abfbca45b8483d9371d245ee3d6f9c0b05749` |
 | qemu 验证 | glibc 2.41 下 `ldd` 零缺项；三个平台插件可加载 |
 | 设备启动 | 成功进入《新超级马里奥兄弟2 黄金版 汉化版》 |
 | 显示 | AISLPC AIS 4.3 英寸 1024×768，Wayland + Weston kiosk |
-| 渲染 | OpenGL ES 3.2，ARM / Mali-G52 |
+| 渲染 | OpenGL ES 3.2，ARM / Mali-G52；Vulkan（libmali ICD）可选 |
+| 图形接口 | OSD 视频页「图形接口」可切 OpenGL / Vulkan（全局配置，重启游戏生效）；Vulkan 经 `/opt/vita3k/wsi` 隐式 WSI 层实机进游戏，OSD 反复开关、翻页正常；默认 OpenGL |
 | 声音 | ALSA PCM `RUNNING`，`Playback Path=SPK` |
 | OSD | 原生 Wayland 子表面叠在 GL 画面上，界面为简体中文；短按 Select 反复开关、长按退出、方向高亮跟手、游戏画面不闪；L1/R1（及 X/Y）切换 主菜单/视频/音频/系统/操作说明 页；Video 页含可视化自定义布局编辑器；自动菜单操作触发读档并成功恢复；Exit 确认后结束独立会话并恢复 ES |
 | 自定义布局 | 编辑器可拖动/缩放 TOP/BOTTOM 双屏矩形：D-pad 或摇杆移动、L1/R1 调宽、X/Y 调高、A 切屏、Start 重置、B 保存；布局为全局一套，B 时写入 `[Layout] custom_*` 并即时应用；画布超出 1024×768 时自动等比缩放居中，双屏完整显示 |
@@ -43,11 +44,12 @@
 | 旧退出 | Select+Start 成功终止 Azahar |
 | 恢复 | ES、killer_daemon、ogage 均 `active`；Weston/Azahar 无遗留；音频仍为 `SPK` |
 | ES 配置 | 已安装 `/usr/local/bin/3ds.sh`，活动配置及 `.sd1/.sd2/.dual` 三个模板均保留 retroarch/azahar 并新增 azahar-qt；Qt 复用原解密包装 |
-| Vulkan | 未验证；生产启动器固定 OpenGL |
 
 关键实现：
 
 - `device/azahar-qt.sh` 通过 transient systemd service 停 ES、起 `/opt/vita3k/weston`，再以 `ark` 运行 Azahar。
+- 图形接口切换：核心设置 `Settings::values.graphics_api`（Software=0 / OpenGL=1 / Vulkan=2）。OSD 写全局 `qt-config.ini` 时必须同时写 `graphics_api\default=false`，否则 `default=true` 会在加载时强制回默认值；每游戏覆盖走 `graphics_api\use_global`。启动器不再固定 OpenGL，只负责注入 Vulkan 运行环境：libvulkan + ICD `rk_vk.json`（libmali G52）和 `VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi`（vita3k 的 WSI 是隐式层，`VK_LAYER_PATH` 枚举不到）。`GetVulkanPhysicalDevices()` 在查询前后保存/恢复 Vulkan-Hpp 默认 dispatcher，否则 headless `Vulkan::Instance` 会改写全局 dispatcher，之后 `Swapchain::SetPresentMode` 崩溃。
+- Qt 6.8 Wayland 的 OSD 重开：全屏 WSI 子表面遮挡主窗口后，Weston 不再回主窗口的 frame callback；Qt 6.8 100 ms 超时后把主窗口置为 inexposed（`QWaylandWindow::isExposed()` 对子表面取父窗口状态），之后 OSD 子表面 `show()` 不再收到 expose，表现为 Vulkan 下 OSD 只有第一次打开能上屏。启动器设置 `QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0` 禁用该超时，Vulkan / OpenGL 各连续 3 轮开关与翻页均正常。
 - `device/3ds.sh` 在 ES 的 Qt 分支复用 `azahar-dec.sh`，并把 `AZAHAR_USER_DIR` 指向 Qt 的 `share/azahar-emu`，避免解密包装把 NAND/SDMC 写到 RetroArch 目录。
 - 数据目录为 `share/azahar-emu`，配置为 `config/azahar-emu/qt-config.ini`，内部日志为 `share/azahar-emu/log/azahar_log.txt`。
 - `src/citra_qt/osd_overlay.*` 实现透明游戏内 OSD：简体中文界面、短按 Select 开关、长按 600 ms 退出、存档/读档、视频/音频/系统设置、可视化布局编辑器、每游戏覆盖和确认页。
@@ -67,7 +69,7 @@
 - 实体手柄 ABXY 方位、手感、方向键、摇杆和扳机仍需人工确认。OSD 的 Select 反复开关、方向/摇杆高亮跟手、L1/R1 翻页、画面不闪、自定义布局编辑器已实机确认。
 - OSD 其他设置保存、每游戏覆盖删除/重建、Restart 确认需继续实机验证。
 - 实际听感未验证，只有 PCM 与输出路径证据。
-- Vulkan + `/opt/vita3k/wsi` 未验证。
+- Vulkan 长时间运行性能和稳定性仍建议抽样观察。
 - ES 前端的选择界面与实际按键导航需在掌机上人工确认；命令入口和设备侧返回 ES 链路单独验证。
 
 流程、部署和完整验证记录见 [qt-frontend.md](qt-frontend.md)。

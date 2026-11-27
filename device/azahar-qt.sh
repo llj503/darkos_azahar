@@ -156,7 +156,7 @@ fi
 chmod 0666 "$RTDIR/$SOCK"
 restore_brightness
 
-# libmali 缺少 Wayland Vulkan WSI，Qt 前端固定使用 OpenGL；保留用户的其他设置。
+# 图形接口与 Vulkan 设备由 OSD 写入 qt-config.ini，启动器不再覆盖。
 CFG="$DATA/config/azahar-emu/qt-config.ini"
 mkdir -p "$DATA/config/azahar-emu/custom"
 python3 - "$CFG" <<'PY'
@@ -187,9 +187,6 @@ def set_value(section, key, value):
         lines.insert(end, f"{key}={rendered}")
     else:
         lines[index] = f"{key}={rendered}"
-
-set_value("Renderer", "graphics_api", 1)
-set_value("Renderer", "graphics_api\\default", True)
 
 guid = "1900a4dd726b333536322d6a6f797300"
 base = f"engine:sdl,guid:{guid},port:0,api:controller"
@@ -247,6 +244,18 @@ ARGS=()
 [ -n "$ROM" ] && ARGS+=(-f "$ROM")
 ARGS+=("${EXTRA[@]}")
 
+# libmali 没有 Wayland Vulkan WSI，用 vita3k 的 WSI 层补 surface 支持。
+# 该层是隐式层，VK_LAYER_PATH 枚举不到，必须用 VK_ADD_IMPLICIT_LAYER_PATH。
+VK_LAYER_ENV=()
+if [ -r /opt/vita3k/wsi/VkLayer_window_system_integration.json ]; then
+    VK_LAYER_ENV=(VK_ADD_IMPLICIT_LAYER_PATH=/opt/vita3k/wsi)
+fi
+
+# 全屏 WSI 子表面遮挡主窗口后，Weston 不再回主窗口的 frame callback；
+# Qt 6.8 收到超时就把主窗口标成不可见，之后 OSD 子表面重开时不再发 expose。
+# 禁用该超时，避免 OSD 第二次打开起不上屏。
+QT_WAYLAND_ENV=(QT_WAYLAND_FRAME_CALLBACK_TIMEOUT=0)
+
 runuser -u ark -- env \
     HOME=/home/ark USER=ark LOGNAME=ark \
     XDG_RUNTIME_DIR="$RTDIR" WAYLAND_DISPLAY="$SOCK" \
@@ -255,4 +264,6 @@ runuser -u ark -- env \
     LD_LIBRARY_PATH="$B/lib:/usr/local/lib" QT_PLUGIN_PATH="$B/qt-plugins" \
     FONTCONFIG_FILE="$B/fonts.conf" LD_PRELOAD="$WL_CLIENT" \
     SDL_AUDIODRIVER=alsa SDL_GAMECONTROLLERCONFIG="$SDL_GAMECONTROLLERCONFIG" \
+    "${QT_WAYLAND_ENV[@]}" \
+    "${VK_LAYER_ENV[@]}" \
     "$B/azahar-qt" "${ARGS[@]}" >"$DATA/logs/azahar-qt.log" 2>&1
