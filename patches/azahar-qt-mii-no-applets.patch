@@ -1,0 +1,18 @@
+--- a/src/citra_qt/citra_qt.cpp
++++ b/src/citra_qt/citra_qt.cpp
+@@ -4680,8 +4680,13 @@
+     // Register frontend applets
+     Frontend::RegisterDefaultApplets(system);
+ 
+-    system.RegisterMiiSelector(std::make_shared<QtMiiSelector>(main_window));
+-    system.RegisterSoftwareKeyboard(std::make_shared<QtKeyboard>(main_window));
++    // dArkOS: the Qt applet dialogs (Mii selector, software keyboard) are separate
++    // top-level windows that need a mouse and keyboard; a kiosk session has neither.
++    // With this variable set the built-in defaults answer instead.
++    if (!qEnvironmentVariableIsSet("AZAHAR_NO_QT_APPLETS")) {
++        system.RegisterMiiSelector(std::make_shared<QtMiiSelector>(main_window));
++        system.RegisterSoftwareKeyboard(std::make_shared<QtKeyboard>(main_window));
++    }
+ 
+ #ifdef __APPLE__
+     // Register microphone permission check.

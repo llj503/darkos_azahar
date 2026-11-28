@@ -109,3 +109,32 @@
 - **自定义布局超出屏幕被裁切**：`custom_*` 原先按窗口像素 1:1 摆放，画布 1710×1270 在 1024×768 上只有左上角可见。改为 `Layout::CustomFrameLayout` 把整块画布等比缩放并居中铺进窗口，编辑器显示实际缩放百分比；截图/录像仍按画布原尺寸输出。
 - **背景图片验证读到全零像素**：在 `RenderToMailbox` 里用 `glReadPixels` 回读时只绑定了 draw framebuffer，读到的是默认帧缓冲。临时把 `state.draw.read_framebuffer` 指向 mailbox 纹理后，四角像素与测试图一致；该诊断代码已移除。
 - **OSD「帧率上限」把百分比误标为 FPS**：`frame_limit` 是原生速度百分比（`sleep_scale = frame_limit / 100`），旧选项却写成 30/60/100/120/144/200 FPS。选「30 FPS」实际把游戏限到 30% 速度，60 FPS 游戏只剩 18 FPS，被误判为设备性能不足。改为「模拟速度」的 25% / 50% / 100%（原生）/ 不限速。
+
+## D. Qt 前端 + 性能补丁（2026-11-28）
+
+裸 2126.2 的 Qt 前端只有 24-30 fps 的手感，和 RA + 核心差距明显。原因是两边不是同一份代码：
+核心版的 31 个补丁全在 `src/video_core/` 和 `src/core/`，与前端无关。
+
+补丁顺序（`scripts/build-azahar-qt.sh` 已固化）：
+
+```
+patches/core/azahar-patch-000 … 034   31 个，000 是 128 文件的基座，必须最先
+patches/azahar-qt-wayland-gles.patch
+patches/azahar-qt-osd.patch
+patches/azahar-qt-mii-no-applets.patch
+scripts/fix-gcc-compat.py              gcc 比 clang 严格的三处等价改写
+```
+
+`azahar-qt-streaming-savestate.patch` 与核心 012 重复，打核心时已覆盖，不再单独打。
+
+产物：38,097,200 B，GLIBC 2.38，`OsdOverlay` 符号 30 个。
+
+### 手感问题不是帧率
+
+帧率数字上去了仍然发滞，两个原因：
+
+1. **GPU 一直在 300 MHz**：`simple_ondemand` 升频滞后，帧时间忽长忽短。
+   `run.sh` 的 `set_governors` 会写 `performance`，但实测被其它服务改回，启动前需再确认一次。
+2. **不限帧**：`frame_limit=0` 配 `async_presentation` 让帧间隔不齐。60 Hz 面板上补默认 100。
+
+两项修好后手感正常。

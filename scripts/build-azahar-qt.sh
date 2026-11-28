@@ -73,15 +73,28 @@ build() {
 		mkdir -p "$BASE/trixie-amd64$(dirname "$SRC_IN_CHROOT")"
 		cp -a "$SRC" "$BASE/trixie-amd64$SRC_IN_CHROOT"
 	fi
+	# 补丁顺序：mamaich 的核心/渲染补丁（000 是 128 文件的基座，必须最先）→
+	# Qt 的 wayland-gles 与 osd → Mii/applet 开关。
+	# azahar-qt-streaming-savestate.patch 与核心 012 是同一件事，打核心时已覆盖，不再重复。
+	if ! grep -Fq 'gammaos_fs_mediump' "$BASE/trixie-amd64$SRC_IN_CHROOT/src/common/settings.h"; then
+		for p in "$ROOT"/patches/core/azahar-patch-*.patch; do
+			echo "== $(basename "$p")"
+			ns patch -Np1 -d "$SRC_IN_CHROOT" < "$p" || { echo "补丁失败: $p"; exit 1; }
+		done
+	fi
 	if ! grep -Fq 'Setting<bool> use_gles{true' "$BASE/trixie-amd64$SRC_IN_CHROOT/src/common/settings.h"; then
 		ns patch -Np1 -d "$SRC_IN_CHROOT" < "$ROOT/patches/azahar-qt-wayland-gles.patch"
-	fi
-	if ! grep -Fq 'CompressDataZSTD(std::istream' "$BASE/trixie-amd64$SRC_IN_CHROOT/src/common/zstd_compression.h"; then
-		ns patch -Np1 -d "$SRC_IN_CHROOT" < "$ROOT/patches/azahar-qt-streaming-savestate.patch"
 	fi
 	if [ ! -f "$BASE/trixie-amd64$SRC_IN_CHROOT/src/citra_qt/osd_overlay.cpp" ]; then
 		ns patch -Np1 -d "$SRC_IN_CHROOT" < "$ROOT/patches/azahar-qt-osd.patch"
 	fi
+	if ! grep -Fq 'AZAHAR_NO_QT_APPLETS' "$BASE/trixie-amd64$SRC_IN_CHROOT/src/citra_qt/citra_qt.cpp"; then
+		ns patch -Np1 -d "$SRC_IN_CHROOT" < "$ROOT/patches/azahar-qt-mii-no-applets.patch"
+	fi
+	# gcc 对 C++20 指定初始化器与三元类型比 clang 严格，三处等价改写见 docs/gcc-compat.md
+	cp "$ROOT/scripts/fix-gcc-compat.py" "$BASE/trixie-amd64/tmp/fix-gcc-compat.py"
+	rm -f "$BASE/trixie-amd64/tmp/fix-done"
+	ns python3 /tmp/fix-gcc-compat.py "$SRC_IN_CHROOT"
 	export DARKOS_BUILD="$BASE" JOBS="$JOBS"
 	ns bash -c "set -e; cd $SRC_IN_CHROOT; rm -rf build-qt; mkdir build-qt; cd build-qt
 		$CMAKE_CMD > /tmp/cmake.log 2>&1 || { echo '== cmake 失败'; tail -40 /tmp/cmake.log; exit 1; }
